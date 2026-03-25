@@ -4,7 +4,7 @@ import { config } from './config';
 import { authMiddleware } from './middleware/auth';
 import proxyRoutes from './routes/proxy';
 import healthRoutes from './routes/health';
-import { ensureNetwork } from './services/docker';
+import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
 import { getAllProxies } from './store';
 
@@ -23,6 +23,9 @@ async function bootstrap(): Promise<void> {
   try {
     console.log('Initializing Docker network...');
     await ensureNetwork();
+
+    console.log('Building telemt proxy image...');
+    await ensureProxyImage();
 
     console.log('Initializing nginx container...');
     await ensureNginxContainer();

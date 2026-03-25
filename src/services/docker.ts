@@ -1,7 +1,31 @@
 import Docker from 'dockerode';
+import { Readable } from 'stream';
 import { config } from '../config';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+
+const TELEMT_DOCKERFILE = `FROM debian:bookworm-slim
+
+RUN apt-get update && \\
+    apt-get install -y curl wget ca-certificates && \\
+    rm -rf /var/lib/apt/lists/*
+
+RUN ARCH=$(uname -m) && \\
+    wget -qO- "https://github.com/telemt/telemt/releases/latest/download/telemt-\${ARCH}-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin/ && \\
+    chmod +x /usr/local/bin/telemt
+
+RUN useradd -r -s /bin/false telemt && \\
+    mkdir -p /etc/telemt /opt/telemt && \\
+    chown -R telemt:telemt /etc/telemt /opt/telemt
+
+WORKDIR /opt/telemt
+
+USER telemt
+
+ENV RUST_LOG=info
+
+CMD ["/usr/local/bin/telemt", "/etc/telemt/config.toml"]
+`;
 
 export async function ensureNetwork(): Promise<void> {
   try {
@@ -31,6 +55,55 @@ export async function pullImage(image: string): Promise<void> {
   }
 }
 
+export async function ensureProxyImage(): Promise<void> {
+  try {
+    await docker.getImage(config.proxyImageName).inspect();
+  } catch {
+    const tarBuffer = createTarBuffer('Dockerfile', TELEMT_DOCKERFILE);
+    const stream = Readable.from(tarBuffer);
+
+    await new Promise<void>((resolve, reject) => {
+      docker.buildImage(stream, { t: config.proxyImageName }, (err, output) => {
+        if (err) return reject(err);
+        if (!output) return reject(new Error('No build stream'));
+        docker.modem.followProgress(output, (err2: Error | null) => {
+          if (err2) return reject(err2);
+          resolve();
+        });
+      });
+    });
+  }
+}
+
+function generateConfigToml(secret: string, domain: string, tag?: string): string {
+  let toml = `[general]
+use_middle_proxy = true
+`;
+
+  if (tag) {
+    toml += `ad_tag = "${tag}"\n`;
+  }
+
+  toml += `
+[general.modes]
+classic = false
+secure = false
+tls = true
+
+[server]
+port = 443
+
+[censorship]
+tls_domain = "${domain}"
+mask = true
+
+[access.users]
+user1 = "${secret}"
+`;
+
+  return toml;
+}
+
 export async function createProxyContainer(
   containerName: string,
   secret: string,
@@ -38,22 +111,22 @@ export async function createProxyContainer(
   tag?: string
 ): Promise<string> {
   await ensureNetwork();
-  await pullImage(config.proxyImage);
-
-  const cmd = ['/bin/start.sh', '-p', '443', '-s', secret, '-a', 'tls'];
-  if (tag) {
-    cmd.push('-t', tag);
-  }
+  await ensureProxyImage();
 
   const container = await docker.createContainer({
-    Image: config.proxyImage,
+    Image: config.proxyImageName,
     name: containerName,
-    Cmd: cmd,
     HostConfig: {
       NetworkMode: config.dockerNetwork,
       RestartPolicy: { Name: 'unless-stopped' },
+      CapAdd: ['NET_BIND_SERVICE'],
     },
   });
+
+  // Inject config.toml into the container before starting
+  const configContent = generateConfigToml(secret, domain, tag);
+  const tarBuffer = createTarBuffer('config.toml', configContent);
+  await container.putArchive(tarBuffer, { path: '/etc/telemt' });
 
   await container.start();
   return container.id;
@@ -179,4 +252,30 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function createTarBuffer(filename: string, content: string): Buffer {
+  const contentBuffer = Buffer.from(content, 'utf-8');
+  const header = Buffer.alloc(512);
+
+  header.write(filename, 0, 100);
+  header.write('0000644\0', 100, 8);
+  header.write('0000000\0', 108, 8);
+  header.write('0000000\0', 116, 8);
+  header.write(contentBuffer.length.toString(8).padStart(11, '0') + '\0', 124, 12);
+  header.write(Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0', 136, 12);
+  header.write('        ', 148, 8);
+  header.write('0', 156, 1);
+
+  let checksum = 0;
+  for (let i = 0; i < 512; i++) {
+    checksum += header[i];
+  }
+  header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148, 8);
+
+  const padding = 512 - (contentBuffer.length % 512);
+  const paddingBuffer = padding < 512 ? Buffer.alloc(padding) : Buffer.alloc(0);
+  const endBlock = Buffer.alloc(1024);
+
+  return Buffer.concat([header, contentBuffer, paddingBuffer, endBlock]);
 }
