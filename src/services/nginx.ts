@@ -14,7 +14,7 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const defaultBackend =
     runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
 
-  return `load_module /etc/nginx/modules/ngx_stream_module.so;
+  return `load_module /usr/lib/nginx/modules/ngx_stream_module.so;
 
 user nginx;
 worker_processes auto;
