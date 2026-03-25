@@ -1,5 +1,7 @@
 export interface ProxyConfig {
   id: string;
+  name: string;
+  note: string;
   port: number;
   secret: string;
   domain: string;
@@ -7,6 +9,9 @@ export interface ProxyConfig {
   status: 'running' | 'stopped' | 'error';
   createdAt: string;
   tag?: string;
+  trafficUp: number;
+  trafficDown: number;
+  connectedIps: string[];
 }
 
 export interface ProxyCreateRequest {
@@ -14,11 +19,15 @@ export interface ProxyCreateRequest {
   secret?: string;
   domain?: string;
   tag?: string;
+  name?: string;
+  note?: string;
 }
 
 export interface ProxyUpdateRequest {
   domain?: string;
   tag?: string;
+  name?: string;
+  note?: string;
 }
 
 export interface ProxyStats {
@@ -30,7 +39,10 @@ export interface ProxyStats {
   memoryLimit: string;
   networkRx: string;
   networkTx: string;
+  networkRxBytes: number;
+  networkTxBytes: number;
   uptime: string;
+  connectedIps: string[];
 }
 
 export interface StoreData {

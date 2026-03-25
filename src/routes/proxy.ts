@@ -65,6 +65,20 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Restart proxy
+router.post('/:id/restart', async (req: Request, res: Response) => {
+  try {
+    const proxy = await proxyService.restartProxy(req.params.id);
+    if (!proxy) {
+      res.status(404).json({ error: 'Proxy not found' });
+      return;
+    }
+    res.json(proxy);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get proxy stats
 router.get('/:id/stats', async (req: Request, res: Response) => {
   try {

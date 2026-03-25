@@ -79,6 +79,8 @@ export async function getContainerStats(containerName: string): Promise<{
   memoryLimit: string;
   networkRx: string;
   networkTx: string;
+  networkRxBytes: number;
+  networkTxBytes: number;
 }> {
   const container = docker.getContainer(containerName);
   const stats = await container.stats({ stream: false });
@@ -106,6 +108,8 @@ export async function getContainerStats(containerName: string): Promise<{
     memoryLimit: formatBytes(memLimit),
     networkRx: formatBytes(netRx),
     networkTx: formatBytes(netTx),
+    networkRxBytes: netRx,
+    networkTxBytes: netTx,
   };
 }
 
@@ -142,6 +146,31 @@ export async function restartContainer(containerName: string): Promise<void> {
 export async function connectContainerToNetwork(containerName: string): Promise<void> {
   const network = docker.getNetwork(config.dockerNetwork);
   await network.connect({ Container: containerName });
+}
+
+export async function getContainerConnectedIps(containerName: string): Promise<string[]> {
+  try {
+    const container = docker.getContainer(containerName);
+    const logs = await container.logs({
+      stdout: true,
+      stderr: true,
+      tail: 500,
+    });
+    const logStr = logs.toString('utf-8');
+    const ipSet = new Set<string>();
+    const ipRegex = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g;
+    let match;
+    while ((match = ipRegex.exec(logStr)) !== null) {
+      const ip = match[1];
+      // Filter out common non-client IPs
+      if (!ip.startsWith('127.') && !ip.startsWith('172.') && !ip.startsWith('10.') && ip !== '0.0.0.0') {
+        ipSet.add(ip);
+      }
+    }
+    return Array.from(ipSet);
+  } catch {
+    return [];
+  }
 }
 
 function formatBytes(bytes: number): string {

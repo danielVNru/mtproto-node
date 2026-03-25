@@ -24,6 +24,8 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
 
   const proxy: ProxyConfig = {
     id,
+    name: req.name || `Proxy ${id}`,
+    note: req.note || '',
     port,
     secret,
     domain,
@@ -31,6 +33,9 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
     status: 'running',
     createdAt: new Date().toISOString(),
     tag: req.tag,
+    trafficUp: 0,
+    trafficDown: 0,
+    connectedIps: [],
   };
 
   try {
@@ -82,6 +87,8 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
 
   if (req.domain) updates.domain = req.domain;
   if (req.tag !== undefined) updates.tag = req.tag;
+  if (req.name !== undefined) updates.name = req.name;
+  if (req.note !== undefined) updates.note = req.note;
 
   if (needsRestart) {
     await dockerService.removeProxyContainer(proxy.containerName);
@@ -94,6 +101,26 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
   }
 
   const updated = store.updateProxy(id, updates);
+  await nginxService.updateNginxConfig(store.getAllProxies());
+  return updated;
+}
+
+export async function restartProxy(id: string): Promise<ProxyConfig | undefined> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return undefined;
+
+  // Удаляем старый контейнер если существует
+  await dockerService.removeProxyContainer(proxy.containerName).catch(() => {});
+
+  // Создаём контейнер заново
+  await dockerService.createProxyContainer(
+    proxy.containerName,
+    proxy.secret,
+    proxy.domain,
+    proxy.tag
+  );
+
+  const updated = store.updateProxy(id, { status: 'running' });
   await nginxService.updateNginxConfig(store.getAllProxies());
   return updated;
 }
@@ -124,12 +151,23 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
         memoryLimit: '0 B',
         networkRx: '0 B',
         networkTx: '0 B',
+        networkRxBytes: 0,
+        networkTxBytes: 0,
         uptime: '0h 0m',
+        connectedIps: [],
       };
     }
 
     const stats = await dockerService.getContainerStats(proxy.containerName);
     const uptime = await dockerService.getContainerUptime(proxy.containerName);
+    const connectedIps = await dockerService.getContainerConnectedIps(proxy.containerName);
+
+    // Update stored traffic and IPs
+    store.updateProxy(id, {
+      trafficUp: stats.networkTxBytes,
+      trafficDown: stats.networkRxBytes,
+      connectedIps,
+    });
 
     return {
       id: proxy.id,
@@ -137,6 +175,7 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
       status,
       ...stats,
       uptime,
+      connectedIps,
     };
   } catch {
     return {
@@ -148,7 +187,10 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
       memoryLimit: '0 B',
       networkRx: '0 B',
       networkTx: '0 B',
+      networkRxBytes: 0,
+      networkTxBytes: 0,
       uptime: 'unknown',
+      connectedIps: [],
     };
   }
 }
