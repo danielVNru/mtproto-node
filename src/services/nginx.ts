@@ -25,6 +25,8 @@ events {
 }
 
 stream {
+    resolver 127.0.0.11 valid=10s;
+
     map $ssl_preread_server_name $backend {
 ${mapEntries}
         default ${defaultBackend};
