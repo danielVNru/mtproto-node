@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { config } from '../config';
 import { ProxyConfig } from '../types';
+import { pullImage } from './docker';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -45,6 +46,7 @@ export async function ensureNginxContainer(): Promise<void> {
     const container = docker.getContainer(config.nginxContainerName);
     await container.inspect();
   } catch {
+    await pullImage('nginx:alpine');
     await docker.createContainer({
       Image: 'nginx:alpine',
       name: config.nginxContainerName,
