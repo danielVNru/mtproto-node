@@ -14,9 +14,7 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const defaultBackend =
     runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
 
-  return `load_module /usr/lib/nginx/modules/ngx_stream_module.so;
-
-user nginx;
+  return `user nginx;
 worker_processes auto;
 
 error_log /var/log/nginx/error.log warn;
@@ -77,11 +75,11 @@ export async function ensureNginxContainer(): Promise<void> {
   }
 
   // Pull image if needed
-  await pullImage('nginx:alpine');
+  await pullImage('nginx:latest');
 
   // Create container (not started yet)
   const container = await docker.createContainer({
-    Image: 'nginx:alpine',
+    Image: 'nginx:latest',
     name: containerName,
     HostConfig: {
       PortBindings: {
