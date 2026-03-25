@@ -1,0 +1,162 @@
+import { v4 as uuidv4 } from 'uuid';
+import { config, FAKE_TLS_DOMAINS } from '../config';
+import { ProxyConfig, ProxyCreateRequest, ProxyStats, ProxyUpdateRequest } from '../types';
+import { generateSecret, getRandomElement, getRandomPort, buildFullSecret } from '../utils/crypto';
+import * as store from '../store';
+import * as dockerService from './docker';
+import * as nginxService from './nginx';
+
+export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig> {
+  const id = uuidv4().split('-')[0];
+  const secret = req.secret || generateSecret();
+  const domain = req.domain || getRandomElement(FAKE_TLS_DOMAINS);
+
+  let port = req.port || 0;
+  if (!port) {
+    do {
+      port = getRandomPort(config.portRangeStart, config.portRangeEnd);
+    } while (store.isPortUsed(port));
+  } else if (store.isPortUsed(port)) {
+    throw new Error(`Port ${port} is already in use`);
+  }
+
+  const containerName = `${config.proxyContainerPrefix}${id}`;
+
+  const proxy: ProxyConfig = {
+    id,
+    port,
+    secret,
+    domain,
+    containerName,
+    status: 'running',
+    createdAt: new Date().toISOString(),
+    tag: req.tag,
+  };
+
+  try {
+    await dockerService.createProxyContainer(containerName, secret, domain, req.tag);
+    store.addProxy(proxy);
+    await nginxService.updateNginxConfig(store.getAllProxies());
+    return proxy;
+  } catch (error) {
+    await dockerService.removeProxyContainer(containerName);
+    throw error;
+  }
+}
+
+export async function listProxies(): Promise<ProxyConfig[]> {
+  const proxies = store.getAllProxies();
+
+  // Update status from Docker
+  for (const proxy of proxies) {
+    const status = await dockerService.getContainerStatus(proxy.containerName);
+    if (status === 'running') {
+      proxy.status = 'running';
+    } else if (status === 'not_found') {
+      proxy.status = 'error';
+    } else {
+      proxy.status = 'stopped';
+    }
+  }
+
+  return proxies;
+}
+
+export async function getProxy(id: string): Promise<ProxyConfig | undefined> {
+  const proxy = store.getProxyById(id);
+  if (proxy) {
+    const status = await dockerService.getContainerStatus(proxy.containerName);
+    if (status === 'running') proxy.status = 'running';
+    else if (status === 'not_found') proxy.status = 'error';
+    else proxy.status = 'stopped';
+  }
+  return proxy;
+}
+
+export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<ProxyConfig | undefined> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return undefined;
+
+  const needsRestart = req.domain && req.domain !== proxy.domain;
+  const updates: Partial<ProxyConfig> = {};
+
+  if (req.domain) updates.domain = req.domain;
+  if (req.tag !== undefined) updates.tag = req.tag;
+
+  if (needsRestart) {
+    await dockerService.removeProxyContainer(proxy.containerName);
+    await dockerService.createProxyContainer(
+      proxy.containerName,
+      proxy.secret,
+      updates.domain || proxy.domain,
+      updates.tag !== undefined ? updates.tag : proxy.tag
+    );
+  }
+
+  const updated = store.updateProxy(id, updates);
+  await nginxService.updateNginxConfig(store.getAllProxies());
+  return updated;
+}
+
+export async function deleteProxy(id: string): Promise<boolean> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return false;
+
+  await dockerService.removeProxyContainer(proxy.containerName);
+  store.removeProxy(id);
+  await nginxService.updateNginxConfig(store.getAllProxies());
+  return true;
+}
+
+export async function getProxyStats(id: string): Promise<ProxyStats | null> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return null;
+
+  try {
+    const status = await dockerService.getContainerStatus(proxy.containerName);
+    if (status !== 'running') {
+      return {
+        id: proxy.id,
+        containerName: proxy.containerName,
+        status,
+        cpuPercent: '0%',
+        memoryUsage: '0 B',
+        memoryLimit: '0 B',
+        networkRx: '0 B',
+        networkTx: '0 B',
+        uptime: '0h 0m',
+      };
+    }
+
+    const stats = await dockerService.getContainerStats(proxy.containerName);
+    const uptime = await dockerService.getContainerUptime(proxy.containerName);
+
+    return {
+      id: proxy.id,
+      containerName: proxy.containerName,
+      status,
+      ...stats,
+      uptime,
+    };
+  } catch {
+    return {
+      id: proxy.id,
+      containerName: proxy.containerName,
+      status: 'error',
+      cpuPercent: '0%',
+      memoryUsage: '0 B',
+      memoryLimit: '0 B',
+      networkRx: '0 B',
+      networkTx: '0 B',
+      uptime: 'unknown',
+    };
+  }
+}
+
+export function getProxyLink(id: string, serverIp: string): string | null {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return null;
+
+  const fullSecret = buildFullSecret(proxy.secret, proxy.domain);
+  return `tg://proxy?server=${encodeURIComponent(serverIp)}&port=443&secret=${fullSecret}`;
+}

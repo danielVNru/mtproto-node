@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  service-node:
+    build: .
+    container_name: mtproto-service-node
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8443}:8443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    environment:
+      - PORT=8443
+      - AUTH_TOKEN=${AUTH_TOKEN}
+      - DATA_DIR=/app/data
+    networks:
+      - mtproto-net
+
+networks:
+  mtproto-net:
+    name: mtproto-net
+    driver: bridge
