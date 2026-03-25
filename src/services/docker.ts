@@ -40,19 +40,15 @@ export async function createProxyContainer(
   await ensureNetwork();
   await pullImage(config.proxyImage);
 
-  const env = [
-    `MTP_PORT=443`,
-    `MTP_SECRET=${secret}`,
-    `MTP_TLS_ONLY=1`,
-  ];
+  const cmd = ['/bin/start.sh', '-p', '443', '-s', secret, '-a', 'tls'];
   if (tag) {
-    env.push(`MTP_TAG=${tag}`);
+    cmd.push('-t', tag);
   }
 
   const container = await docker.createContainer({
     Image: config.proxyImage,
     name: containerName,
-    Env: env,
+    Cmd: cmd,
     HostConfig: {
       NetworkMode: config.dockerNetwork,
       RestartPolicy: { Name: 'unless-stopped' },
