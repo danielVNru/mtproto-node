@@ -47,4 +47,5 @@ export interface ProxyStats {
 
 export interface StoreData {
   proxies: ProxyConfig[];
+  customDomains?: string[];
 }

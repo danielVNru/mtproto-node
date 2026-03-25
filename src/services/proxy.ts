@@ -18,7 +18,9 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
     domain = req.domain;
   } else {
     const usedDomains = new Set(store.getUsedDomains());
-    const available = FAKE_TLS_DOMAINS.filter((d) => !usedDomains.has(d));
+    const customDomains = store.getCustomDomains();
+    const domainPool = customDomains.length > 0 ? customDomains : FAKE_TLS_DOMAINS;
+    const available = domainPool.filter((d) => !usedDomains.has(d));
     if (available.length === 0) {
       throw new Error('No available domains left. Delete a proxy or specify a custom domain.');
     }
@@ -193,7 +195,7 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
 
     const stats = await dockerService.getContainerStats(proxy.containerName);
     const uptime = await dockerService.getContainerUptime(proxy.containerName);
-    const connectedIps = await dockerService.getContainerConnectedIps(proxy.containerName);
+    const connectedIps = await nginxService.getNginxConnectedIps(proxy.domain);
 
     // Update stored traffic and IPs
     store.updateProxy(id, {

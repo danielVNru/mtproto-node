@@ -6,7 +6,7 @@ import proxyRoutes from './routes/proxy';
 import healthRoutes from './routes/health';
 import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
-import { getAllProxies } from './store';
+import { getAllProxies, getCustomDomains, setCustomDomains } from './store';
 import { execFile } from 'child_process';
 
 const app = express();
@@ -30,6 +30,21 @@ app.post('/api/update', authMiddleware, (_req, res) => {
     }
     res.json({ success: true, output: stdout });
   });
+});
+
+// Domain dictionary
+app.get('/api/domains', authMiddleware, (_req, res) => {
+  res.json({ domains: getCustomDomains() });
+});
+
+app.put('/api/domains', authMiddleware, (req, res) => {
+  const { domains } = req.body;
+  if (!Array.isArray(domains) || !domains.every((d: unknown) => typeof d === 'string')) {
+    res.status(400).json({ error: 'domains must be an array of strings' });
+    return;
+  }
+  setCustomDomains(domains);
+  res.json({ domains: getCustomDomains() });
 });
 
 async function bootstrap(): Promise<void> {

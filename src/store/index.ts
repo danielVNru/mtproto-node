@@ -70,3 +70,13 @@ export function isDomainUsed(domain: string): boolean {
 export function getUsedDomains(): string[] {
   return readStore().proxies.map((p) => p.domain);
 }
+
+export function getCustomDomains(): string[] {
+  return readStore().customDomains || [];
+}
+
+export function setCustomDomains(domains: string[]): void {
+  const store = readStore();
+  store.customDomains = domains;
+  writeStore(store);
+}
