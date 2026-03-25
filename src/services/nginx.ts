@@ -42,9 +42,12 @@ ${mapEntries}
 }
 
 export async function ensureNginxContainer(): Promise<void> {
+  const container = docker.getContainer(config.nginxContainerName);
   try {
-    const container = docker.getContainer(config.nginxContainerName);
-    await container.inspect();
+    const info = await container.inspect();
+    if (!info.State.Running) {
+      await container.start();
+    }
   } catch {
     await pullImage('nginx:alpine');
     await docker.createContainer({
@@ -62,14 +65,20 @@ export async function ensureNginxContainer(): Promise<void> {
       },
     });
 
-    const container = docker.getContainer(config.nginxContainerName);
-    await container.start();
+    const newContainer = docker.getContainer(config.nginxContainerName);
+    await newContainer.start();
   }
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
   const nginxConf = generateNginxConfig(proxies);
   const container = docker.getContainer(config.nginxContainerName);
+
+  // Ensure container is running before writing config
+  const info = await container.inspect();
+  if (!info.State.Running) {
+    await container.start();
+  }
 
   // Write config to container
   const tarStream = createTarBuffer('nginx.conf', nginxConf);
