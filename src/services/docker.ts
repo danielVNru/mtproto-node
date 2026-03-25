@@ -1,6 +1,5 @@
 import Docker from 'dockerode';
 import { config } from '../config';
-import { buildFullSecret } from '../utils/crypto';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -41,8 +40,11 @@ export async function createProxyContainer(
   await ensureNetwork();
   await pullImage(config.proxyImage);
 
-  const fullSecret = buildFullSecret(secret, domain);
-  const env = [`MTP_SECRET=${fullSecret}`];
+  const env = [
+    `MTP_PORT=443`,
+    `MTP_SECRET=${secret}`,
+    `MTP_TLS_ONLY=1`,
+  ];
   if (tag) {
     env.push(`MTP_TAG=${tag}`);
   }
