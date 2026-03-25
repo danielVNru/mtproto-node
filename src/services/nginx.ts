@@ -1,7 +1,8 @@
 import Docker from 'dockerode';
 import { config } from '../config';
-import { ProxyConfig } from '../types';
+import { ProxyConfig, ConnectedIpInfo } from '../types';
 import { pullImage } from './docker';
+import * as store from '../store';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -13,6 +14,49 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
 
   const defaultBackend =
     runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
+
+  // Build per-domain connection limit maps
+  const limitProxies = runningProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
+  const limitZoneEntries = limitProxies
+    .map((p) => {
+      const zoneName = p.domain.replace(/\./g, '_');
+      return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;`;
+    })
+    .join('\n');
+
+  // Blacklisted IPs
+  const blacklistedIps = store.getBlacklistedIps();
+  const denyEntries = blacklistedIps.map((ip) => `        deny ${ip};`).join('\n');
+
+  // Build server blocks: one main + per-domain limit servers if needed
+  let serverBlock: string;
+  if (limitProxies.length > 0) {
+    // For proxies with limits, we use separate server blocks with SNI matching
+    // nginx stream doesn't support limit_conn per map, so we use a workaround:
+    // route everything to a shared upstream but apply limit_conn globally per zone
+    const limitConnDirectives = limitProxies
+      .map((p) => {
+        const zoneName = p.domain.replace(/\./g, '_');
+        return `        limit_conn ${zoneName} ${p.maxConnections};`;
+      })
+      .join('\n');
+
+    serverBlock = `    server {
+        listen 443;
+        proxy_pass $backend;
+        ssl_preread on;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+${denyEntries ? denyEntries + '\n' : ''}${limitConnDirectives ? limitConnDirectives + '\n' : ''}    }`;
+  } else {
+    serverBlock = `    server {
+        listen 443;
+        proxy_pass $backend;
+        ssl_preread on;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+${denyEntries ? denyEntries + '\n' : ''}    }`;
+  }
 
   return `user nginx;
 worker_processes auto;
@@ -30,18 +74,12 @@ stream {
     log_format proxy '$remote_addr [$time_local] $ssl_preread_server_name $status';
     access_log /dev/stdout proxy;
 
-    map $ssl_preread_server_name $backend {
+${limitZoneEntries ? limitZoneEntries + '\n\n' : ''}    map $ssl_preread_server_name $backend {
 ${mapEntries}
         default ${defaultBackend};
     }
 
-    server {
-        listen 443;
-        proxy_pass $backend;
-        ssl_preread on;
-        proxy_connect_timeout 10s;
-        proxy_timeout 300s;
-    }
+${serverBlock}
 }
 `;
 }
@@ -146,7 +184,49 @@ function isTelegramIp(ip: string): boolean {
   return TELEGRAM_DC_RANGES.some((prefix) => ip.startsWith(prefix));
 }
 
-export async function getNginxConnectedIps(domain: string): Promise<string[]> {
+// Simple in-memory geo cache to avoid hammering the API
+const geoCache = new Map<string, { country: string; countryCode: string; ts: number }>();
+const GEO_CACHE_TTL = 3600000; // 1 hour
+
+async function lookupGeo(ips: string[]): Promise<Map<string, { country: string; countryCode: string }>> {
+  const result = new Map<string, { country: string; countryCode: string }>();
+  const toFetch: string[] = [];
+
+  for (const ip of ips) {
+    const cached = geoCache.get(ip);
+    if (cached && Date.now() - cached.ts < GEO_CACHE_TTL) {
+      result.set(ip, { country: cached.country, countryCode: cached.countryCode });
+    } else {
+      toFetch.push(ip);
+    }
+  }
+
+  if (toFetch.length > 0) {
+    try {
+      const resp = await fetch('http://ip-api.com/batch?fields=query,country,countryCode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(toFetch.map((ip) => ({ query: ip }))),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        const data = await resp.json() as Array<{ query: string; country?: string; countryCode?: string }>;
+        for (const entry of data) {
+          if (entry.country && entry.countryCode) {
+            geoCache.set(entry.query, { country: entry.country, countryCode: entry.countryCode, ts: Date.now() });
+            result.set(entry.query, { country: entry.country, countryCode: entry.countryCode });
+          }
+        }
+      }
+    } catch {
+      // Geo lookup failed — return without country info
+    }
+  }
+
+  return result;
+}
+
+export async function getNginxConnectedIps(domain: string): Promise<ConnectedIpInfo[]> {
   try {
     const container = docker.getContainer(config.nginxContainerName);
     const logs = await container.logs({
@@ -156,6 +236,7 @@ export async function getNginxConnectedIps(domain: string): Promise<string[]> {
     });
     const logStr = logs.toString('utf-8');
     const ipSet = new Set<string>();
+    const blacklisted = new Set(store.getBlacklistedIps());
     // Log format: "<ip> [<date>] <domain> <status>"
     // Docker stream header (8 bytes) may prefix each line
     for (const line of logStr.split('\n')) {
@@ -169,13 +250,25 @@ export async function getNginxConnectedIps(domain: string): Promise<string[]> {
           !ip.startsWith('10.') &&
           !ip.startsWith('192.168.') &&
           ip !== '0.0.0.0' &&
-          !isTelegramIp(ip)
+          !isTelegramIp(ip) &&
+          !blacklisted.has(ip)
         ) {
           ipSet.add(ip);
         }
       }
     }
-    return Array.from(ipSet);
+
+    const ips = Array.from(ipSet);
+    const geoMap = await lookupGeo(ips);
+
+    return ips.map((ip) => {
+      const geo = geoMap.get(ip);
+      return {
+        ip,
+        country: geo?.country,
+        countryCode: geo?.countryCode,
+      };
+    });
   } catch {
     return [];
   }

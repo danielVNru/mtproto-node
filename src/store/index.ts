@@ -80,3 +80,13 @@ export function setCustomDomains(domains: string[]): void {
   store.customDomains = domains;
   writeStore(store);
 }
+
+export function getBlacklistedIps(): string[] {
+  return readStore().blacklistedIps || [];
+}
+
+export function setBlacklistedIps(ips: string[]): void {
+  const store = readStore();
+  store.blacklistedIps = ips;
+  writeStore(store);
+}

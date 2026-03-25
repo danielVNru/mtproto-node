@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { config, FAKE_TLS_DOMAINS } from '../config';
-import { ProxyConfig, ProxyCreateRequest, ProxyStats, ProxyUpdateRequest } from '../types';
+import { ProxyConfig, ProxyCreateRequest, ProxyStats, ProxyUpdateRequest, ConnectedIpInfo } from '../types';
 import { generateSecret, getRandomElement, getRandomPort, buildFullSecret } from '../utils/crypto';
 import * as store from '../store';
 import * as dockerService from './docker';
@@ -52,6 +52,7 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
     trafficUp: 0,
     trafficDown: 0,
     connectedIps: [],
+    maxConnections: req.maxConnections,
   };
 
   try {
@@ -108,6 +109,7 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
   if (req.tag !== undefined) updates.tag = req.tag;
   if (req.name !== undefined) updates.name = req.name;
   if (req.note !== undefined) updates.note = req.note;
+  if (req.maxConnections !== undefined) updates.maxConnections = req.maxConnections;
 
   if (needsRestart) {
     await dockerService.removeProxyContainer(proxy.containerName);
@@ -189,7 +191,7 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
         networkRxBytes: 0,
         networkTxBytes: 0,
         uptime: '0h 0m',
-        connectedIps: [],
+        connectedIps: [] as ConnectedIpInfo[],
       };
     }
 
@@ -201,7 +203,7 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
     store.updateProxy(id, {
       trafficUp: stats.networkTxBytes,
       trafficDown: stats.networkRxBytes,
-      connectedIps,
+      connectedIps: connectedIps.map((c) => c.ip),
     });
 
     return {
@@ -225,7 +227,7 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
       networkRxBytes: 0,
       networkTxBytes: 0,
       uptime: 'unknown',
-      connectedIps: [],
+      connectedIps: [] as ConnectedIpInfo[],
     };
   }
 }

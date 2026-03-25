@@ -1,12 +1,12 @@
 import express from 'express';
 import cors from 'cors';
-import { config } from './config';
+import { config, FAKE_TLS_DOMAINS } from './config';
 import { authMiddleware } from './middleware/auth';
 import proxyRoutes from './routes/proxy';
 import healthRoutes from './routes/health';
 import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
-import { getAllProxies, getCustomDomains, setCustomDomains } from './store';
+import { getAllProxies, getCustomDomains, setCustomDomains, getBlacklistedIps, setBlacklistedIps } from './store';
 import { execFile } from 'child_process';
 
 const app = express();
@@ -22,8 +22,8 @@ app.use('/api/proxies', authMiddleware, proxyRoutes);
 
 // Update service node
 app.post('/api/update', authMiddleware, (_req, res) => {
-  const scriptPath = '/app/update.sh';
-  execFile('/bin/bash', [scriptPath], { cwd: '/app', timeout: 120000 }, (error, stdout, stderr) => {
+  const scriptPath = '/app/project/update.sh';
+  execFile('/bin/bash', [scriptPath], { cwd: '/app/project', timeout: 120000 }, (error, stdout, stderr) => {
     if (error) {
       res.status(500).json({ success: false, error: error.message, output: stderr || stdout });
       return;
@@ -34,7 +34,8 @@ app.post('/api/update', authMiddleware, (_req, res) => {
 
 // Domain dictionary
 app.get('/api/domains', authMiddleware, (_req, res) => {
-  res.json({ domains: getCustomDomains() });
+  const custom = getCustomDomains();
+  res.json({ domains: custom.length > 0 ? custom : FAKE_TLS_DOMAINS });
 });
 
 app.put('/api/domains', authMiddleware, (req, res) => {
@@ -45,6 +46,27 @@ app.put('/api/domains', authMiddleware, (req, res) => {
   }
   setCustomDomains(domains);
   res.json({ domains: getCustomDomains() });
+});
+
+// IP Blacklist
+app.get('/api/blacklist', authMiddleware, (_req, res) => {
+  res.json({ ips: getBlacklistedIps() });
+});
+
+app.put('/api/blacklist', authMiddleware, async (req, res) => {
+  const { ips } = req.body;
+  if (!Array.isArray(ips) || !ips.every((ip: unknown) => typeof ip === 'string')) {
+    res.status(400).json({ error: 'ips must be an array of strings' });
+    return;
+  }
+  setBlacklistedIps(ips);
+  // Regenerate nginx config to apply deny rules
+  try {
+    await updateNginxConfig(getAllProxies());
+  } catch (e) {
+    // non-fatal
+  }
+  res.json({ ips: getBlacklistedIps() });
 });
 
 async function bootstrap(): Promise<void> {

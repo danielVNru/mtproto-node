@@ -1,3 +1,9 @@
+export interface ConnectedIpInfo {
+  ip: string;
+  country?: string;
+  countryCode?: string;
+}
+
 export interface ProxyConfig {
   id: string;
   name: string;
@@ -12,6 +18,7 @@ export interface ProxyConfig {
   trafficUp: number;
   trafficDown: number;
   connectedIps: string[];
+  maxConnections?: number;
 }
 
 export interface ProxyCreateRequest {
@@ -21,6 +28,7 @@ export interface ProxyCreateRequest {
   tag?: string;
   name?: string;
   note?: string;
+  maxConnections?: number;
 }
 
 export interface ProxyUpdateRequest {
@@ -28,6 +36,7 @@ export interface ProxyUpdateRequest {
   tag?: string;
   name?: string;
   note?: string;
+  maxConnections?: number;
 }
 
 export interface ProxyStats {
@@ -42,10 +51,11 @@ export interface ProxyStats {
   networkRxBytes: number;
   networkTxBytes: number;
   uptime: string;
-  connectedIps: string[];
+  connectedIps: ConnectedIpInfo[];
 }
 
 export interface StoreData {
   proxies: ProxyConfig[];
   customDomains?: string[];
+  blacklistedIps?: string[];
 }
