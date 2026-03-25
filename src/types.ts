@@ -6,7 +6,7 @@ export interface ProxyConfig {
   secret: string;
   domain: string;
   containerName: string;
-  status: 'running' | 'stopped' | 'error';
+  status: 'running' | 'stopped' | 'paused' | 'error';
   createdAt: string;
   tag?: string;
   trafficUp: number;

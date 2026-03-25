@@ -71,6 +71,8 @@ export async function listProxies(): Promise<ProxyConfig[]> {
     const status = await dockerService.getContainerStatus(proxy.containerName);
     if (status === 'running') {
       proxy.status = 'running';
+    } else if (status === 'paused') {
+      proxy.status = 'paused';
     } else if (status === 'not_found') {
       proxy.status = 'error';
     } else {
@@ -86,6 +88,7 @@ export async function getProxy(id: string): Promise<ProxyConfig | undefined> {
   if (proxy) {
     const status = await dockerService.getContainerStatus(proxy.containerName);
     if (status === 'running') proxy.status = 'running';
+    else if (status === 'paused') proxy.status = 'paused';
     else if (status === 'not_found') proxy.status = 'error';
     else proxy.status = 'stopped';
   }
@@ -147,6 +150,22 @@ export async function deleteProxy(id: string): Promise<boolean> {
   store.removeProxy(id);
   await nginxService.updateNginxConfig(store.getAllProxies());
   return true;
+}
+
+export async function pauseProxy(id: string): Promise<ProxyConfig | undefined> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return undefined;
+
+  await dockerService.pauseContainer(proxy.containerName);
+  return store.updateProxy(id, { status: 'paused' });
+}
+
+export async function unpauseProxy(id: string): Promise<ProxyConfig | undefined> {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return undefined;
+
+  await dockerService.unpauseContainer(proxy.containerName);
+  return store.updateProxy(id, { status: 'running' });
 }
 
 export async function getProxyStats(id: string): Promise<ProxyStats | null> {

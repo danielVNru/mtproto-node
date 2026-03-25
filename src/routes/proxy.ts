@@ -79,6 +79,34 @@ router.post('/:id/restart', async (req: Request, res: Response) => {
   }
 });
 
+// Pause proxy
+router.post('/:id/pause', async (req: Request, res: Response) => {
+  try {
+    const proxy = await proxyService.pauseProxy(req.params.id);
+    if (!proxy) {
+      res.status(404).json({ error: 'Proxy not found' });
+      return;
+    }
+    res.json(proxy);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Unpause proxy
+router.post('/:id/unpause', async (req: Request, res: Response) => {
+  try {
+    const proxy = await proxyService.unpauseProxy(req.params.id);
+    if (!proxy) {
+      res.status(404).json({ error: 'Proxy not found' });
+      return;
+    }
+    res.json(proxy);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get proxy stats
 router.get('/:id/stats', async (req: Request, res: Response) => {
   try {

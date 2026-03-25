@@ -216,9 +216,38 @@ export async function restartContainer(containerName: string): Promise<void> {
   await container.restart();
 }
 
+export async function pauseContainer(containerName: string): Promise<void> {
+  const container = docker.getContainer(containerName);
+  await container.pause();
+}
+
+export async function unpauseContainer(containerName: string): Promise<void> {
+  const container = docker.getContainer(containerName);
+  await container.unpause();
+}
+
 export async function connectContainerToNetwork(containerName: string): Promise<void> {
   const network = docker.getNetwork(config.dockerNetwork);
   await network.connect({ Container: containerName });
+}
+
+// Telegram DC IP ranges to filter out
+const TELEGRAM_DC_RANGES = [
+  '149.154.160.', '149.154.161.', '149.154.162.', '149.154.163.',
+  '149.154.164.', '149.154.165.', '149.154.166.', '149.154.167.',
+  '149.154.168.', '149.154.169.', '149.154.170.', '149.154.171.',
+  '149.154.172.', '149.154.173.', '149.154.174.', '149.154.175.',
+  '91.108.4.', '91.108.5.', '91.108.6.', '91.108.7.', '91.108.8.',
+  '91.108.9.', '91.108.10.', '91.108.11.', '91.108.12.', '91.108.13.',
+  '91.108.16.', '91.108.17.', '91.108.18.', '91.108.19.', '91.108.20.',
+  '91.108.56.', '91.108.57.', '91.108.58.', '91.108.59.',
+  '91.105.192.', '91.105.193.', '91.105.194.', '91.105.195.',
+  '185.76.151.',
+  '95.161.64.',
+];
+
+function isTelegramIp(ip: string): boolean {
+  return TELEGRAM_DC_RANGES.some((prefix) => ip.startsWith(prefix));
 }
 
 export async function getContainerConnectedIps(containerName: string): Promise<string[]> {
@@ -235,8 +264,15 @@ export async function getContainerConnectedIps(containerName: string): Promise<s
     let match;
     while ((match = ipRegex.exec(logStr)) !== null) {
       const ip = match[1];
-      // Filter out common non-client IPs
-      if (!ip.startsWith('127.') && !ip.startsWith('172.') && !ip.startsWith('10.') && ip !== '0.0.0.0') {
+      // Filter out private, loopback, and Telegram DC IPs
+      if (
+        !ip.startsWith('127.') &&
+        !ip.startsWith('172.') &&
+        !ip.startsWith('10.') &&
+        !ip.startsWith('192.168.') &&
+        ip !== '0.0.0.0' &&
+        !isTelegramIp(ip)
+      ) {
         ipSet.add(ip);
       }
     }

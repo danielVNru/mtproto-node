@@ -7,6 +7,7 @@ import healthRoutes from './routes/health';
 import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
 import { getAllProxies } from './store';
+import { execFile } from 'child_process';
 
 const app = express();
 
@@ -18,6 +19,18 @@ app.use('/api/health', healthRoutes);
 
 // Protected routes
 app.use('/api/proxies', authMiddleware, proxyRoutes);
+
+// Update service node
+app.post('/api/update', authMiddleware, (_req, res) => {
+  const scriptPath = '/app/update.sh';
+  execFile('/bin/bash', [scriptPath], { cwd: '/app', timeout: 120000 }, (error, stdout, stderr) => {
+    if (error) {
+      res.status(500).json({ success: false, error: error.message, output: stderr || stdout });
+      return;
+    }
+    res.json({ success: true, output: stdout });
+  });
+});
 
 async function bootstrap(): Promise<void> {
   try {
