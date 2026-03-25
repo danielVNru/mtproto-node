@@ -45,11 +45,32 @@ export async function ensureNginxContainer(): Promise<void> {
   const container = docker.getContainer(config.nginxContainerName);
   try {
     const info = await container.inspect();
+
+    // Verify port 443 is bound to the host
+    const portBindings = info.HostConfig?.PortBindings?.['443/tcp'];
+    const hasPort443 = Array.isArray(portBindings) && portBindings.some(
+      (b: { HostPort?: string }) => b.HostPort === '443'
+    );
+
+    if (!hasPort443) {
+      // Container exists but without correct port bindings — recreate
+      try { await container.stop(); } catch { /* already stopped */ }
+      await container.remove();
+      throw new Error('recreate');
+    }
+
     if (!info.State.Running) {
       await container.start();
     }
   } catch {
     await pullImage('nginx:alpine');
+
+    // Remove leftover container if it exists without correct config
+    try {
+      const old = docker.getContainer(config.nginxContainerName);
+      await old.remove({ force: true });
+    } catch { /* doesn't exist */ }
+
     await docker.createContainer({
       Image: 'nginx:alpine',
       name: config.nginxContainerName,
