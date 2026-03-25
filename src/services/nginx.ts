@@ -6,15 +6,17 @@ import { pullImage } from './docker';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export function generateNginxConfig(proxies: ProxyConfig[]): string {
-  const mapEntries = proxies
-    .filter((p) => p.status === 'running')
+  const runningProxies = proxies.filter((p) => p.status === 'running');
+  const mapEntries = runningProxies
     .map((p) => `        ${p.domain} ${p.containerName}:443;`)
     .join('\n');
 
   const defaultBackend =
-    proxies.length > 0 ? `${proxies[0].containerName}:443` : '127.0.0.1:1';
+    runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
 
-  return `user nginx;
+  return `load_module /etc/nginx/modules/ngx_stream_module.so;
+
+user nginx;
 worker_processes auto;
 
 error_log /var/log/nginx/error.log warn;
@@ -42,64 +44,72 @@ ${mapEntries}
 }
 
 export async function ensureNginxContainer(): Promise<void> {
-  const container = docker.getContainer(config.nginxContainerName);
-  try {
-    const info = await container.inspect();
+  const containerName = config.nginxContainerName;
 
-    // Verify port 443 is bound to the host
+  // Remove any existing container that might be misconfigured
+  try {
+    const existing = docker.getContainer(containerName);
+    const info = await existing.inspect();
+
+    // Check if port 443 is properly bound
     const portBindings = info.HostConfig?.PortBindings?.['443/tcp'];
     const hasPort443 = Array.isArray(portBindings) && portBindings.some(
       (b: { HostPort?: string }) => b.HostPort === '443'
     );
 
-    if (!hasPort443) {
-      // Container exists but without correct port bindings — recreate
-      try { await container.stop(); } catch { /* already stopped */ }
-      await container.remove();
-      throw new Error('recreate');
+    if (hasPort443 && info.State.Running) {
+      return; // Container is healthy
     }
 
-    if (!info.State.Running) {
-      await container.start();
+    if (hasPort443 && !info.State.Running) {
+      // Right config, just not running — inject config and start
+      const initialConf = generateNginxConfig([]);
+      const tar = createTarBuffer('nginx.conf', initialConf);
+      await existing.putArchive(tar, { path: '/etc/nginx' });
+      await existing.start();
+      return;
     }
+
+    // Wrong port config — remove and recreate
+    await existing.remove({ force: true });
   } catch {
-    await pullImage('nginx:alpine');
-
-    // Remove leftover container if it exists without correct config
-    try {
-      const old = docker.getContainer(config.nginxContainerName);
-      await old.remove({ force: true });
-    } catch { /* doesn't exist */ }
-
-    await docker.createContainer({
-      Image: 'nginx:alpine',
-      name: config.nginxContainerName,
-      HostConfig: {
-        PortBindings: {
-          '443/tcp': [{ HostPort: '443' }],
-        },
-        NetworkMode: config.dockerNetwork,
-        RestartPolicy: { Name: 'unless-stopped' },
-      },
-      ExposedPorts: {
-        '443/tcp': {},
-      },
-    });
-
-    const newContainer = docker.getContainer(config.nginxContainerName);
-    await newContainer.start();
+    // Container doesn't exist — will create below
   }
+
+  // Pull image if needed
+  await pullImage('nginx:alpine');
+
+  // Create container (not started yet)
+  const container = await docker.createContainer({
+    Image: 'nginx:alpine',
+    name: containerName,
+    HostConfig: {
+      PortBindings: {
+        '443/tcp': [{ HostPort: '443' }],
+      },
+      NetworkMode: config.dockerNetwork,
+      RestartPolicy: { Name: 'unless-stopped' },
+    },
+    ExposedPorts: {
+      '443/tcp': {},
+    },
+  });
+
+  // Inject stream config BEFORE starting so nginx starts with the correct config
+  const initialConf = generateNginxConfig([]);
+  const tar = createTarBuffer('nginx.conf', initialConf);
+  await container.putArchive(tar, { path: '/etc/nginx' });
+
+  await container.start();
+  console.log('nginx container created and started with stream config on port 443');
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
+  // Ensure nginx is up before updating
+  await ensureNginxContainer();
+
   const nginxConf = generateNginxConfig(proxies);
   const container = docker.getContainer(config.nginxContainerName);
-
-  // Ensure container is running before writing config
-  const info = await container.inspect();
-  if (!info.State.Running) {
-    await container.start();
-  }
 
   // Write config to container
   const tarStream = createTarBuffer('nginx.conf', nginxConf);
