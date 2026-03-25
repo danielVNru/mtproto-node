@@ -62,3 +62,11 @@ export function removeProxy(id: string): boolean {
 export function isPortUsed(port: number): boolean {
   return readStore().proxies.some((p) => p.port === port);
 }
+
+export function isDomainUsed(domain: string): boolean {
+  return readStore().proxies.some((p) => p.domain === domain);
+}
+
+export function getUsedDomains(): string[] {
+  return readStore().proxies.map((p) => p.domain);
+}

@@ -9,7 +9,21 @@ import * as nginxService from './nginx';
 export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig> {
   const id = uuidv4().split('-')[0];
   const secret = req.secret || generateSecret();
-  const domain = req.domain || getRandomElement(FAKE_TLS_DOMAINS);
+
+  let domain: string;
+  if (req.domain) {
+    if (store.isDomainUsed(req.domain)) {
+      throw new Error(`Domain ${req.domain} is already in use by another proxy`);
+    }
+    domain = req.domain;
+  } else {
+    const usedDomains = new Set(store.getUsedDomains());
+    const available = FAKE_TLS_DOMAINS.filter((d) => !usedDomains.has(d));
+    if (available.length === 0) {
+      throw new Error('No available domains left. Delete a proxy or specify a custom domain.');
+    }
+    domain = getRandomElement(available);
+  }
 
   let port = req.port || 0;
   if (!port) {
