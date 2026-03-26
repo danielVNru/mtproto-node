@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -15,34 +14,58 @@ echo -e "${CYAN}  MTProto Service Node — Установка      ${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo ""
 
+# Check root
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}Ошибка: запустите скрипт от root (sudo).${NC}"
+    echo -e "  sudo bash <(wget -qO- ...)"
+    exit 1
+fi
+
 # Check Docker
 if ! command -v docker &> /dev/null; then
     echo -e "${YELLOW}Docker не найден. Устанавливаю Docker...${NC}"
     curl -fsSL https://get.docker.com | sh
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Ошибка установки Docker.${NC}"
+        exit 1
+    fi
 fi
 
 if ! docker compose version &> /dev/null 2>&1; then
-    echo -e "${RED}Docker Compose не найден. Установите Docker Compose.${NC}"
+    echo -e "${RED}Docker Compose не найден. Установите Docker Compose v2.${NC}"
     exit 1
 fi
 
 # Check git
 if ! command -v git &> /dev/null; then
     echo -e "${YELLOW}Git не найден. Устанавливаю git...${NC}"
-    apt-get update -qq && apt-get install -y -qq git > /dev/null 2>&1 || \
-    yum install -y -q git > /dev/null 2>&1 || \
-    apk add --no-cache git > /dev/null 2>&1
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq && apt-get install -y -qq git
+    elif command -v yum &> /dev/null; then
+        yum install -y -q git
+    elif command -v apk &> /dev/null; then
+        apk add --no-cache git
+    fi
+    if ! command -v git &> /dev/null; then
+        echo -e "${RED}Не удалось установить git.${NC}"
+        exit 1
+    fi
 fi
 
 # Clone or update repo
-if [ -d "$INSTALL_DIR" ]; then
+if [ -d "$INSTALL_DIR/.git" ]; then
     echo -e "${CYAN}Обновление из репозитория...${NC}"
     cd "$INSTALL_DIR"
     git fetch origin master
     git reset --hard origin/master
 else
     echo -e "${CYAN}Скачивание последней версии...${NC}"
+    rm -rf "$INSTALL_DIR"
     git clone --branch master "$REPO_URL" "$INSTALL_DIR"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Ошибка клонирования репозитория.${NC}"
+        exit 1
+    fi
     cd "$INSTALL_DIR"
 fi
 
@@ -80,11 +103,19 @@ mkdir -p data
 echo -e "${CYAN}Сборка и запуск сервис-ноды...${NC}"
 docker compose up -d --build
 
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Ошибка при запуске контейнеров.${NC}"
+    exit 1
+fi
+
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=${SERVER_IP:-"0.0.0.0"}
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Сервис-нода запущена!                 ${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo -e "  API:     ${CYAN}http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '0.0.0.0'):${PORT}${NC}"
+echo -e "  API:     ${CYAN}http://${SERVER_IP}:${PORT}${NC}"
 echo -e "  Токен:   ${YELLOW}${AUTH_TOKEN}${NC}"
 echo -e "  Каталог: ${YELLOW}${INSTALL_DIR}${NC}"
 echo -e "${GREEN}========================================${NC}"

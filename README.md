@@ -41,7 +41,7 @@
 Одна команда для загрузки и запуска:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/danielVNru/mtproto-node/master/install.sh)
+wget -qO /tmp/node-install.sh https://raw.githubusercontent.com/danielVNru/mtproto-node/master/install.sh && sudo bash /tmp/node-install.sh
 ```
 
 Скрипт автоматически:
