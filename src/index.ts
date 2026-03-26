@@ -7,6 +7,7 @@ import healthRoutes from './routes/health';
 import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
 import { getAllProxies, getCustomDomains, setCustomDomains, getBlacklistedIps, setBlacklistedIps } from './store';
+import { collectAllProxyStats } from './services/proxy';
 import { execFile } from 'child_process';
 
 const app = express();
@@ -89,6 +90,18 @@ async function bootstrap(): Promise<void> {
     app.listen(config.port, '0.0.0.0', () => {
       console.log(`Service node running on port ${config.port}`);
     });
+
+    // Background stats collector — every 5 minutes
+    setInterval(async () => {
+      try {
+        await collectAllProxyStats();
+      } catch (err) {
+        console.error('Background stats collection error:', err);
+      }
+    }, 5 * 60 * 1000);
+
+    // Run first collection after 30 seconds so containers are ready
+    setTimeout(() => collectAllProxyStats().catch(() => {}), 30000);
   } catch (error) {
     console.error('Failed to start service node:', error);
     process.exit(1);

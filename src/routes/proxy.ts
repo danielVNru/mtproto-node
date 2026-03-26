@@ -157,4 +157,18 @@ router.get('/:id/ip-history', async (req: Request, res: Response) => {
   }
 });
 
+// Clear proxy history (stats + IP)
+router.delete('/:id/clear-history', async (req: Request, res: Response) => {
+  try {
+    const cleared = proxyService.clearProxyHistory(req.params.id);
+    if (!cleared) {
+      res.status(404).json({ error: 'Proxy not found' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

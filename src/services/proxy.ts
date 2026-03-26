@@ -272,3 +272,23 @@ export function getProxyStatsHistory(id: string): StatsSnapshot[] {
 export function getProxyIpHistory(id: string): IpHistoryEntry[] {
   return store.getIpHistory(id);
 }
+
+export function clearProxyHistory(id: string): boolean {
+  const proxy = store.getProxyById(id);
+  if (!proxy) return false;
+  store.removeStatsHistory(id);
+  store.removeIpHistory(id);
+  return true;
+}
+
+// Background collector: gather stats + IPs for ALL running proxies
+export async function collectAllProxyStats(): Promise<void> {
+  const proxies = store.getAllProxies();
+  for (const proxy of proxies) {
+    try {
+      await getProxyStats(proxy.id);
+    } catch {
+      // skip failed proxies silently
+    }
+  }
+}
