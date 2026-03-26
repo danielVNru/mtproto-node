@@ -59,3 +59,28 @@ export interface StoreData {
   customDomains?: string[];
   blacklistedIps?: string[];
 }
+
+export interface StatsSnapshot {
+  timestamp: string;
+  cpuPercent: number;
+  memoryBytes: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  connectedCount: number;
+}
+
+export interface IpHistoryEntry {
+  ip: string;
+  country?: string;
+  countryCode?: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface StatsHistoryData {
+  [proxyId: string]: StatsSnapshot[];
+}
+
+export interface IpHistoryData {
+  [proxyId: string]: IpHistoryEntry[];
+}

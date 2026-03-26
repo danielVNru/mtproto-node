@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { config, FAKE_TLS_DOMAINS } from '../config';
-import { ProxyConfig, ProxyCreateRequest, ProxyStats, ProxyUpdateRequest, ConnectedIpInfo } from '../types';
+import { ProxyConfig, ProxyCreateRequest, ProxyStats, ProxyUpdateRequest, ConnectedIpInfo, StatsSnapshot, IpHistoryEntry } from '../types';
 import { generateSecret, getRandomElement, getRandomPort, buildFullSecret } from '../utils/crypto';
 import * as store from '../store';
 import * as dockerService from './docker';
@@ -152,6 +152,8 @@ export async function deleteProxy(id: string): Promise<boolean> {
 
   await dockerService.removeProxyContainer(proxy.containerName);
   store.removeProxy(id);
+  store.removeStatsHistory(id);
+  store.removeIpHistory(id);
   await nginxService.updateNginxConfig(store.getAllProxies());
   return true;
 }
@@ -206,6 +208,29 @@ export async function getProxyStats(id: string): Promise<ProxyStats | null> {
       connectedIps: connectedIps.map((c) => c.ip),
     });
 
+    // Save stats snapshot (throttled to 5-min intervals in store)
+    const cpuNum = parseFloat(stats.cpuPercent.replace('%', '')) || 0;
+    const memMatch = stats.memoryUsage.match(/([\d.]+)\s*(B|KB|MB|GB)/i);
+    let memBytes = 0;
+    if (memMatch) {
+      const val = parseFloat(memMatch[1]);
+      const unit = memMatch[2].toUpperCase();
+      memBytes = unit === 'GB' ? val * 1073741824 : unit === 'MB' ? val * 1048576 : unit === 'KB' ? val * 1024 : val;
+    }
+    store.addStatsSnapshot(id, {
+      timestamp: new Date().toISOString(),
+      cpuPercent: cpuNum,
+      memoryBytes: memBytes,
+      networkRxBytes: stats.networkRxBytes,
+      networkTxBytes: stats.networkTxBytes,
+      connectedCount: connectedIps.length,
+    });
+
+    // Update IP history
+    if (connectedIps.length > 0) {
+      store.updateIpHistory(id, connectedIps);
+    }
+
     return {
       id: proxy.id,
       containerName: proxy.containerName,
@@ -238,4 +263,12 @@ export function getProxyLink(id: string, serverIp: string): string | null {
 
   const fullSecret = buildFullSecret(proxy.secret, proxy.domain);
   return `tg://proxy?server=${encodeURIComponent(serverIp)}&port=443&secret=${fullSecret}`;
+}
+
+export function getProxyStatsHistory(id: string): StatsSnapshot[] {
+  return store.getStatsHistory(id);
+}
+
+export function getProxyIpHistory(id: string): IpHistoryEntry[] {
+  return store.getIpHistory(id);
 }

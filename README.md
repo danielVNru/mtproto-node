@@ -14,7 +14,6 @@
 - Пользовательский пул доменов для fake TLS (50 доменов по умолчанию)
 - Обновление из панели управления
 - REST API с авторизацией по токену
-- Использует [seriyps/mtproto_proxy](https://github.com/seriyps/mtproto_proxy) (Erlang)
 
 ## Архитектура
 

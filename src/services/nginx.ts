@@ -8,55 +8,59 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const runningProxies = proxies.filter((p) => p.status === 'running');
+
+  // Separate proxies into those with and without connection limits
+  const limitProxies = runningProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
+  const unlimitedProxies = runningProxies.filter((p) => !p.maxConnections || p.maxConnections <= 0);
+
+  // For proxies with limits, assign internal ports starting from 10001
+  const limitPortMap = new Map<string, number>();
+  limitProxies.forEach((p, i) => {
+    limitPortMap.set(p.domain, 10001 + i);
+  });
+
+  // Build SNI map: limited proxies → internal port, unlimited → direct backend
   const mapEntries = runningProxies
-    .map((p) => `        ${p.domain} ${p.containerName}:443;`)
+    .map((p) => {
+      const internalPort = limitPortMap.get(p.domain);
+      if (internalPort) {
+        return `        ${p.domain} 127.0.0.1:${internalPort};`;
+      }
+      return `        ${p.domain} ${p.containerName}:443;`;
+    })
     .join('\n');
 
   const defaultBackend =
     runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
 
-  // Build per-domain connection limit maps
-  const limitProxies = runningProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
-  const limitZoneEntries = limitProxies
-    .map((p) => {
-      const zoneName = p.domain.replace(/\./g, '_');
-      return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;`;
-    })
-    .join('\n');
-
   // Blacklisted IPs
   const blacklistedIps = store.getBlacklistedIps();
   const denyEntries = blacklistedIps.map((ip) => `        deny ${ip};`).join('\n');
 
-  // Build server blocks: one main + per-domain limit servers if needed
-  let serverBlock: string;
-  if (limitProxies.length > 0) {
-    // For proxies with limits, we use separate server blocks with SNI matching
-    // nginx stream doesn't support limit_conn per map, so we use a workaround:
-    // route everything to a shared upstream but apply limit_conn globally per zone
-    const limitConnDirectives = limitProxies
-      .map((p) => {
-        const zoneName = p.domain.replace(/\./g, '_');
-        return `        limit_conn ${zoneName} ${p.maxConnections};`;
-      })
-      .join('\n');
-
-    serverBlock = `    server {
-        listen 443;
-        proxy_pass $backend;
-        ssl_preread on;
-        proxy_connect_timeout 10s;
-        proxy_timeout 300s;
-${denyEntries ? denyEntries + '\n' : ''}${limitConnDirectives ? limitConnDirectives + '\n' : ''}    }`;
-  } else {
-    serverBlock = `    server {
+  // Main server block (SNI routing on port 443)
+  const mainServer = `    server {
         listen 443;
         proxy_pass $backend;
         ssl_preread on;
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
 ${denyEntries ? denyEntries + '\n' : ''}    }`;
-  }
+
+  // Per-domain limit server blocks on internal ports
+  const limitBlocks = limitProxies
+    .map((p) => {
+      const zoneName = p.domain.replace(/\./g, '_');
+      const internalPort = limitPortMap.get(p.domain)!;
+      return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;
+    server {
+        listen 127.0.0.1:${internalPort};
+        proxy_pass ${p.containerName}:443;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+        limit_conn ${zoneName} ${p.maxConnections};
+    }`;
+    })
+    .join('\n\n');
 
   return `user nginx;
 worker_processes auto;
@@ -74,13 +78,14 @@ stream {
     log_format proxy '$remote_addr [$time_local] $ssl_preread_server_name $status';
     access_log /dev/stdout proxy;
 
-${limitZoneEntries ? limitZoneEntries + '\n\n' : ''}    map $ssl_preread_server_name $backend {
+    map $ssl_preread_server_name $backend {
 ${mapEntries}
         default ${defaultBackend};
     }
 
-${serverBlock}
-}
+${mainServer}
+
+${limitBlocks ? limitBlocks + '\n' : ''}}
 `;
 }
 

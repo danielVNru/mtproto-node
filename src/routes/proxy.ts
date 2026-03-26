@@ -137,4 +137,24 @@ router.get('/:id/link', async (req: Request, res: Response) => {
   res.json({ link });
 });
 
+// Get proxy stats history
+router.get('/:id/stats-history', async (req: Request, res: Response) => {
+  try {
+    const history = proxyService.getProxyStatsHistory(req.params.id);
+    res.json(history);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get proxy IP history
+router.get('/:id/ip-history', async (req: Request, res: Response) => {
+  try {
+    const history = proxyService.getProxyIpHistory(req.params.id);
+    res.json(history);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
