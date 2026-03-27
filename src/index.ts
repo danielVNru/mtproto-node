@@ -6,6 +6,7 @@ import proxyRoutes from './routes/proxy';
 import healthRoutes from './routes/health';
 import { ensureNetwork, ensureProxyImage } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
+import { startNginxLogWatcher } from './services/nginx';
 import { getAllProxies, getCustomDomains, setCustomDomains, getBlacklistedIps, setBlacklistedIps } from './store';
 import { collectAllProxyStats } from './services/proxy';
 import { execFile } from 'child_process';
@@ -102,6 +103,9 @@ async function bootstrap(): Promise<void> {
 
     // Run first collection after 30 seconds so containers are ready
     setTimeout(() => collectAllProxyStats().catch(() => {}), 30000);
+
+    // Real-time IP recording from nginx log stream
+    startNginxLogWatcher();
   } catch (error) {
     console.error('Failed to start service node:', error);
     process.exit(1);

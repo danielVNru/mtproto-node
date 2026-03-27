@@ -314,3 +314,90 @@ function createTarBuffer(filename: string, content: string): Buffer {
 
   return Buffer.concat([header, contentBuffer, paddingBuffer, endBlock]);
 }
+
+// --- Real-time IP watcher via nginx log streaming ---
+
+// Cache domain→proxyId to avoid reading disk on every log line
+let domainToProxyCache: Map<string, string> = new Map();
+let domainCacheTs = 0;
+
+function getProxyIdByDomain(domain: string): string | undefined {
+  if (Date.now() - domainCacheTs > 30000) {
+    const proxies = store.getAllProxies();
+    domainToProxyCache = new Map(proxies.map((p) => [p.domain, p.id]));
+    domainCacheTs = Date.now();
+  }
+  return domainToProxyCache.get(domain);
+}
+
+function processNginxLogLine(line: string): void {
+  // Log format: "<ip> [<date>] <domain> <status>"
+  const match = line.match(
+    /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+\[.*?\]\s+(\S+)/
+  );
+  if (!match) return;
+  const [, ip, domain] = match;
+
+  if (
+    ip.startsWith('127.') ||
+    ip.startsWith('172.') ||
+    ip.startsWith('10.') ||
+    ip.startsWith('192.168.') ||
+    ip === '0.0.0.0' ||
+    isTelegramIp(ip)
+  ) return;
+
+  if (domain === '-' || domain === '') return;
+
+  const proxyId = getProxyIdByDomain(domain);
+  if (!proxyId) return;
+
+  if (store.getBlacklistedIps().includes(ip)) return;
+
+  // Geo lookup is async; record immediately without geo, then update with geo
+  store.updateIpHistory(proxyId, [{ ip }]);
+  lookupGeo([ip]).then((geoMap) => {
+    const geo = geoMap.get(ip);
+    if (geo) store.updateIpHistory(proxyId, [{ ip, country: geo.country, countryCode: geo.countryCode }]);
+  }).catch(() => {});
+}
+
+async function watchNginxLogs(): Promise<void> {
+  const container = docker.getContainer(config.nginxContainerName);
+  const stream = await container.logs({
+    follow: true,
+    stdout: true,
+    stderr: false,
+    since: Math.floor(Date.now() / 1000),
+  }) as unknown as NodeJS.ReadableStream;
+
+  let buf = '';
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', (chunk: Buffer) => {
+      // Docker log stream has 8-byte frame headers; strip control chars and parse lines
+      buf += chunk.toString('utf-8').replace(/[\x00-\x08\x0e-\x1f]/g, '');
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) processNginxLogLine(trimmed);
+      }
+    });
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+}
+
+export function startNginxLogWatcher(): void {
+  const reconnect = (delay = 0) => {
+    setTimeout(async () => {
+      try {
+        await watchNginxLogs();
+      } catch {
+        // container not ready yet or stream ended — will retry
+      }
+      reconnect(5000);
+    }, delay);
+  };
+  reconnect(3000); // small initial delay to let nginx fully start
+}
