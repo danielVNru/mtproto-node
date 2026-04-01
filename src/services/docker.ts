@@ -75,7 +75,7 @@ export async function ensureProxyImage(): Promise<void> {
   }
 }
 
-function generateProxychainsConfig(socks5Host: string): string {
+function generateProxychainsConfig(socks5Ip: string): string {
   return `strict_chain
 quiet_mode
 proxy_dns
@@ -83,8 +83,21 @@ tcp_read_time_out 15000
 tcp_connect_time_out 8000
 
 [ProxyList]
-socks5 ${socks5Host} 10808
+socks5 ${socks5Ip} 10808
 `;
+}
+
+async function resolveContainerIp(containerName: string): Promise<string> {
+  const container = docker.getContainer(containerName);
+  const info = await container.inspect();
+  const networks = info.NetworkSettings.Networks;
+  // Prefer the shared mtproto network, fall back to any available IP
+  if (networks[config.dockerNetwork]?.IPAddress) {
+    return networks[config.dockerNetwork].IPAddress;
+  }
+  const first = Object.values(networks).find(n => n?.IPAddress);
+  if (first?.IPAddress) return first.IPAddress;
+  throw new Error(`Cannot resolve IP for container ${containerName}`);
 }
 
 function generateConfigToml(secret: string, domain: string, tag?: string): string {
@@ -143,7 +156,8 @@ export async function createProxyContainer(
 
   // Inject proxychains4.conf if VPN socks5 host specified
   if (socks5Host) {
-    const pcConfig = generateProxychainsConfig(socks5Host);
+    const socks5Ip = await resolveContainerIp(socks5Host);
+    const pcConfig = generateProxychainsConfig(socks5Ip);
     const pcTar = createTarBuffer('proxychains4.conf', pcConfig);
     await container.putArchive(pcTar, { path: '/etc' });
   }
