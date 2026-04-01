@@ -114,7 +114,12 @@ mkdir -p data
 
 # Build and start
 echo -e "${CYAN}Сборка и запуск сервис-ноды...${NC}"
-docker compose up -d --build
+docker build --network=host -t mtproto-node-service-node .
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Ошибка при сборке образа.${NC}"
+    exit 1
+fi
+docker compose up -d
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Ошибка при запуске контейнеров.${NC}"
