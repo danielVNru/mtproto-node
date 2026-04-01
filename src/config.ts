@@ -2,6 +2,7 @@ import path from 'path';
 
 export const config = {
   port: parseInt(process.env.PORT || '8443', 10),
+  nginxPort: parseInt(process.env.NGINX_PORT || '443', 10),
   authToken: process.env.AUTH_TOKEN || '',
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   dockerNetwork: 'mtproto-net',

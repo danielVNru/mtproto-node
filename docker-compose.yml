@@ -16,6 +16,7 @@ services:
     environment:
       - PORT=8443
       - AUTH_TOKEN=${AUTH_TOKEN}
+      - NGINX_PORT=${NGINX_PORT:-443}
       - DATA_DIR=/app/data
     networks:
       - mtproto-net

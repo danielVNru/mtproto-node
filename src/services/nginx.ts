@@ -9,9 +9,10 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const runningProxies = proxies.filter((p) => p.status === 'running');
 
-  // Split into SNI-based (port 443) vs dedicated-port proxies
-  const sniProxies = runningProxies.filter((p) => !p.listenPort || p.listenPort === 443);
-  const portProxies = runningProxies.filter((p) => p.listenPort && p.listenPort !== 443);
+  // Split into SNI-based (nginxPort) vs dedicated-port proxies
+  const nginxPort = config.nginxPort;
+  const sniProxies = runningProxies.filter((p) => !p.listenPort || p.listenPort === nginxPort);
+  const portProxies = runningProxies.filter((p) => p.listenPort && p.listenPort !== nginxPort);
 
   // For SNI proxies with connection limits, assign internal loopback ports (10001+)
   const limitSniProxies = sniProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
@@ -20,14 +21,14 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
     limitPortMap.set(p.domain, 10001 + i);
   });
 
-  // SNI map entries (port 443)
+  // SNI map entries (nginxPort)
   const mapEntries = sniProxies
     .map((p) => {
       const internalPort = limitPortMap.get(p.domain);
       if (internalPort) {
         return `        ${p.domain} 127.0.0.1:${internalPort};`;
       }
-      return `        ${p.domain} ${p.containerName}:443;`;
+      return `        ${p.domain} ${p.containerName}:${nginxPort};`;
     })
     .join('\n');
 
@@ -38,9 +39,9 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const blacklistedIps = store.getBlacklistedIps();
   const denyEntries = blacklistedIps.map((ip) => `        deny ${ip};`).join('\n');
 
-  // Main SNI server block on port 443
+  // Main SNI server block on nginxPort
   const mainServer = `    server {
-        listen 443;
+        listen ${nginxPort};
         proxy_pass $backend;
         ssl_preread on;
         proxy_connect_timeout 10s;
@@ -55,7 +56,7 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
       return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;
     server {
         listen 127.0.0.1:${internalPort};
-        proxy_pass ${p.containerName}:443;
+        proxy_pass ${p.containerName}:${nginxPort};
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
         limit_conn ${zoneName} ${p.maxConnections};
@@ -67,8 +68,8 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
   const portBlocks = portProxies
     .map((p) => {
       const limitLine = p.maxConnections && p.maxConnections > 0
-        ? `\n        limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:443;\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};\n    }`
-        : `\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:443;\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}    }`;
+        ? `\n        limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:${nginxPort};\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};\n    }`
+        : `\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:${nginxPort};\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}    }`;
       return limitLine;
     })
     .join('\n');
@@ -119,7 +120,7 @@ ${limitBlocks ? limitBlocks + '\n' : ''}${portBlocks ? portBlocks + '\n' : ''}}
 
 export async function ensureNginxContainer(extraPorts: number[] = []): Promise<void> {
   const containerName = config.nginxContainerName;
-  const requiredPorts = [443, ...extraPorts.filter((p) => p !== 443)];
+  const requiredPorts = [config.nginxPort, ...extraPorts.filter((p) => p !== config.nginxPort)];
 
   // Remove any existing container that might be misconfigured
   try {
@@ -183,9 +184,9 @@ export async function ensureNginxContainer(extraPorts: number[] = []): Promise<v
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
-  // Collect all required ports: 443 + any custom listenPorts
+  // Collect all required ports: nginxPort + any custom listenPorts
   const extraPorts = proxies
-    .filter((p) => p.listenPort && p.listenPort !== 443)
+    .filter((p) => p.listenPort && p.listenPort !== config.nginxPort)
     .map((p) => p.listenPort!);
 
   // Ensure nginx is up with correct port bindings before updating

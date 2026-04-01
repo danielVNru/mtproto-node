@@ -92,12 +92,21 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; th
     exit 1
 fi
 
+read -p "Порт прокси (nginx) [443]: " NGINX_PORT
+NGINX_PORT=${NGINX_PORT:-443}
+
+if ! [[ "$NGINX_PORT" =~ ^[0-9]+$ ]] || [ "$NGINX_PORT" -lt 1 ] || [ "$NGINX_PORT" -gt 65535 ]; then
+    echo -e "${RED}Некорректный номер порта${NC}"
+    exit 1
+fi
+
 # Generate 32-char token
 AUTH_TOKEN=$(openssl rand -hex 16)
 
 echo ""
 echo -e "${GREEN}Конфигурация:${NC}"
-echo -e "  Порт:  ${YELLOW}${PORT}${NC}"
+echo -e "  Порт API:    ${YELLOW}${PORT}${NC}"
+echo -e "  Порт прокси: ${YELLOW}${NGINX_PORT}${NC}"
 echo -e "  Токен: ${YELLOW}${AUTH_TOKEN}${NC}"
 echo ""
 echo -e "${YELLOW}⚠  СОХРАНИТЕ ТОКЕН! Он понадобится для подключения из панели.${NC}"
@@ -106,6 +115,7 @@ echo ""
 # Create .env file
 cat > .env << EOF
 PORT=${PORT}
+NGINX_PORT=${NGINX_PORT}
 AUTH_TOKEN=${AUTH_TOKEN}
 EOF
 
