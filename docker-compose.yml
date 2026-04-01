@@ -2,7 +2,6 @@ services:
   service-node:
     build:
       context: .
-      network: host
     container_name: mtproto-service-node
     restart: unless-stopped
     dns:

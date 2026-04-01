@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM node:20-alpine
 
 RUN apk add --no-cache bash git docker-cli docker-cli-compose
@@ -5,7 +6,7 @@ RUN apk add --no-cache bash git docker-cli docker-cli-compose
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install --production=false --prefer-online
+RUN --network=host npm install --production=false
 
 COPY tsconfig.json ./
 COPY src ./src
