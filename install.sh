@@ -114,7 +114,7 @@ mkdir -p data
 
 # Build and start
 echo -e "${CYAN}Сборка и запуск сервис-ноды...${NC}"
-docker compose up -d --build
+DOCKER_BUILDKIT=1 docker compose up -d --build
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Ошибка при запуске контейнеров.${NC}"
