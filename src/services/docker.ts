@@ -7,7 +7,7 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 const TELEMT_DOCKERFILE = `FROM debian:bookworm-slim
 
 RUN apt-get update && \\
-    apt-get install -y curl wget ca-certificates && \\
+    apt-get install -y curl wget ca-certificates proxychains4 && \\
     rm -rf /var/lib/apt/lists/*
 
 RUN ARCH=$(uname -m) && \\
@@ -24,7 +24,7 @@ USER telemt
 
 ENV RUST_LOG=info
 
-CMD ["/usr/local/bin/telemt", "/etc/telemt/config.toml"]
+CMD ["/bin/sh", "-c", "if [ -f /etc/proxychains4.conf ]; then exec proxychains4 -f /etc/proxychains4.conf /usr/local/bin/telemt /etc/telemt/config.toml; else exec /usr/local/bin/telemt /etc/telemt/config.toml; fi"]
 `;
 
 export async function ensureNetwork(): Promise<void> {
@@ -75,6 +75,17 @@ export async function ensureProxyImage(): Promise<void> {
   }
 }
 
+function generateProxychainsConfig(socks5Host: string): string {
+  return `strict_chain
+quiet_mode
+tcp_read_time_out 15000
+tcp_connect_time_out 8000
+
+[ProxyList]
+socks5 ${socks5Host} 10808
+`;
+}
+
 function generateConfigToml(secret: string, domain: string, tag?: string): string {
   let toml = `[general]
 use_middle_proxy = true
@@ -108,7 +119,8 @@ export async function createProxyContainer(
   containerName: string,
   secret: string,
   domain: string,
-  tag?: string
+  tag?: string,
+  socks5Host?: string
 ): Promise<string> {
   await ensureNetwork();
   await ensureProxyImage();
@@ -127,6 +139,13 @@ export async function createProxyContainer(
   const configContent = generateConfigToml(secret, domain, tag);
   const tarBuffer = createTarBuffer('config.toml', configContent);
   await container.putArchive(tarBuffer, { path: '/etc/telemt' });
+
+  // Inject proxychains4.conf if VPN socks5 host specified
+  if (socks5Host) {
+    const pcConfig = generateProxychainsConfig(socks5Host);
+    const pcTar = createTarBuffer('proxychains4.conf', pcConfig);
+    await container.putArchive(pcTar, { path: '/etc' });
+  }
 
   await container.start();
   return container.id;

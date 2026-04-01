@@ -19,6 +19,9 @@ export interface ProxyConfig {
   trafficDown: number;
   connectedIps: string[];
   maxConnections?: number;
+  listenPort?: number;       // if set and != 443, proxy gets its own TCP port
+  vpnSubscription?: string;  // VLESS subscription URL
+  vpnContainerName?: string; // xray container name when VPN is active
 }
 
 export interface ProxyCreateRequest {
@@ -29,6 +32,8 @@ export interface ProxyCreateRequest {
   name?: string;
   note?: string;
   maxConnections?: number;
+  listenPort?: number;
+  vpnSubscription?: string;
 }
 
 export interface ProxyUpdateRequest {
@@ -37,6 +42,7 @@ export interface ProxyUpdateRequest {
   name?: string;
   note?: string;
   maxConnections?: number;
+  vpnSubscription?: string;
 }
 
 export interface ProxyStats {

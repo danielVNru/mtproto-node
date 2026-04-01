@@ -5,6 +5,7 @@ import { generateSecret, getRandomElement, getRandomPort, buildFullSecret } from
 import * as store from '../store';
 import * as dockerService from './docker';
 import * as nginxService from './nginx';
+import * as xrayService from './xray';
 
 export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig> {
   const id = uuidv4().split('-')[0];
@@ -38,6 +39,17 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
 
   const containerName = `${config.proxyContainerPrefix}${id}`;
 
+  // Handle VPN subscription
+  let vpnContainerName: string | undefined;
+  let socks5Host: string | undefined;
+  if (req.vpnSubscription) {
+    vpnContainerName = `${config.xrayContainerPrefix}${id}`;
+    const vlessConfig = await xrayService.fetchAndParseSubscription(req.vpnSubscription);
+    if (!vlessConfig) throw new Error('Failed to parse VPN subscription URL');
+    await xrayService.createXrayContainer(vpnContainerName, vlessConfig);
+    socks5Host = vpnContainerName;
+  }
+
   const proxy: ProxyConfig = {
     id,
     name: req.name || `Proxy ${id}`,
@@ -53,15 +65,19 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
     trafficDown: 0,
     connectedIps: [],
     maxConnections: req.maxConnections,
+    listenPort: req.listenPort,
+    vpnSubscription: req.vpnSubscription,
+    vpnContainerName,
   };
 
   try {
-    await dockerService.createProxyContainer(containerName, secret, domain, req.tag);
+    await dockerService.createProxyContainer(containerName, secret, domain, req.tag, socks5Host);
     store.addProxy(proxy);
     await nginxService.updateNginxConfig(store.getAllProxies());
     return proxy;
   } catch (error) {
     await dockerService.removeProxyContainer(containerName);
+    if (vpnContainerName) await xrayService.removeXrayContainer(vpnContainerName);
     throw error;
   }
 }
@@ -102,7 +118,7 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
   const proxy = store.getProxyById(id);
   if (!proxy) return undefined;
 
-  const needsRestart = req.domain && req.domain !== proxy.domain;
+  let needsRestart = !!(req.domain && req.domain !== proxy.domain);
   const updates: Partial<ProxyConfig> = {};
 
   if (req.domain) updates.domain = req.domain;
@@ -111,13 +127,38 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
   if (req.note !== undefined) updates.note = req.note;
   if (req.maxConnections !== undefined) updates.maxConnections = req.maxConnections;
 
+  // Handle VPN subscription change
+  let newSocks5Host: string | undefined = proxy.vpnContainerName;
+  if (req.vpnSubscription !== undefined && req.vpnSubscription !== proxy.vpnSubscription) {
+    // Remove old xray container
+    if (proxy.vpnContainerName) {
+      await xrayService.removeXrayContainer(proxy.vpnContainerName);
+      updates.vpnContainerName = undefined;
+      newSocks5Host = undefined;
+    }
+
+    if (req.vpnSubscription) {
+      const newVpnName = `${config.xrayContainerPrefix}${id}`;
+      const vlessConfig = await xrayService.fetchAndParseSubscription(req.vpnSubscription);
+      if (!vlessConfig) throw new Error('Failed to parse VPN subscription URL');
+      await xrayService.createXrayContainer(newVpnName, vlessConfig);
+      updates.vpnContainerName = newVpnName;
+      updates.vpnSubscription = req.vpnSubscription;
+      newSocks5Host = newVpnName;
+    } else {
+      updates.vpnSubscription = '';
+    }
+    needsRestart = true;
+  }
+
   if (needsRestart) {
     await dockerService.removeProxyContainer(proxy.containerName);
     await dockerService.createProxyContainer(
       proxy.containerName,
       proxy.secret,
       updates.domain || proxy.domain,
-      updates.tag !== undefined ? updates.tag : proxy.tag
+      updates.tag !== undefined ? updates.tag : proxy.tag,
+      newSocks5Host
     );
   }
 
@@ -133,12 +174,13 @@ export async function restartProxy(id: string): Promise<ProxyConfig | undefined>
   // Удаляем старый контейнер если существует
   await dockerService.removeProxyContainer(proxy.containerName).catch(() => {});
 
-  // Создаём контейнер заново
+  // Создаём контейнер заново (с VPN если настроен)
   await dockerService.createProxyContainer(
     proxy.containerName,
     proxy.secret,
     proxy.domain,
-    proxy.tag
+    proxy.tag,
+    proxy.vpnContainerName
   );
 
   const updated = store.updateProxy(id, { status: 'running' });
@@ -151,6 +193,9 @@ export async function deleteProxy(id: string): Promise<boolean> {
   if (!proxy) return false;
 
   await dockerService.removeProxyContainer(proxy.containerName);
+  if (proxy.vpnContainerName) {
+    await xrayService.removeXrayContainer(proxy.vpnContainerName);
+  }
   store.removeProxy(id);
   store.removeStatsHistory(id);
   store.removeIpHistory(id);

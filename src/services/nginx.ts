@@ -9,18 +9,19 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 export function generateNginxConfig(proxies: ProxyConfig[]): string {
   const runningProxies = proxies.filter((p) => p.status === 'running');
 
-  // Separate proxies into those with and without connection limits
-  const limitProxies = runningProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
-  const unlimitedProxies = runningProxies.filter((p) => !p.maxConnections || p.maxConnections <= 0);
+  // Split into SNI-based (port 443) vs dedicated-port proxies
+  const sniProxies = runningProxies.filter((p) => !p.listenPort || p.listenPort === 443);
+  const portProxies = runningProxies.filter((p) => p.listenPort && p.listenPort !== 443);
 
-  // For proxies with limits, assign internal ports starting from 10001
+  // For SNI proxies with connection limits, assign internal loopback ports (10001+)
+  const limitSniProxies = sniProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
   const limitPortMap = new Map<string, number>();
-  limitProxies.forEach((p, i) => {
+  limitSniProxies.forEach((p, i) => {
     limitPortMap.set(p.domain, 10001 + i);
   });
 
-  // Build SNI map: limited proxies → internal port, unlimited → direct backend
-  const mapEntries = runningProxies
+  // SNI map entries (port 443)
+  const mapEntries = sniProxies
     .map((p) => {
       const internalPort = limitPortMap.get(p.domain);
       if (internalPort) {
@@ -30,14 +31,14 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
     })
     .join('\n');
 
-  const defaultBackend =
-    runningProxies.length > 0 ? `${runningProxies[0].containerName}:443` : '127.0.0.1:1';
+  // Default backend: HTML fallback
+  const defaultBackend = '127.0.0.1:8088';
 
   // Blacklisted IPs
   const blacklistedIps = store.getBlacklistedIps();
   const denyEntries = blacklistedIps.map((ip) => `        deny ${ip};`).join('\n');
 
-  // Main server block (SNI routing on port 443)
+  // Main SNI server block on port 443
   const mainServer = `    server {
         listen 443;
         proxy_pass $backend;
@@ -46,8 +47,8 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
         proxy_timeout 300s;
 ${denyEntries ? denyEntries + '\n' : ''}    }`;
 
-  // Per-domain limit server blocks on internal ports
-  const limitBlocks = limitProxies
+  // Per-domain limit server blocks (loopback, for SNI proxies with limits)
+  const limitBlocks = limitSniProxies
     .map((p) => {
       const zoneName = p.domain.replace(/\./g, '_');
       const internalPort = limitPortMap.get(p.domain)!;
@@ -62,6 +63,22 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     })
     .join('\n\n');
 
+  // Dedicated port server blocks
+  const portBlocks = portProxies
+    .map((p) => {
+      const limitLine = p.maxConnections && p.maxConnections > 0
+        ? `\n        limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:443;\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};\n    }`
+        : `\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:443;\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}    }`;
+      return limitLine;
+    })
+    .join('\n');
+
+  // HTML fallback page served when no SNI/port match
+  const fallbackHtml = '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Welcome</title></head>'
+    + '<body style="font-family:sans-serif;text-align:center;padding:60px">'
+    + '<h1>Welcome</h1><p>This server is operating normally.</p>'
+    + '</body></html>';
+
   return `user nginx;
 worker_processes auto;
 
@@ -70,6 +87,17 @@ pid /var/run/nginx.pid;
 
 events {
     worker_connections 4096;
+}
+
+http {
+    server {
+        listen 127.0.0.1:8088;
+        server_name _;
+        location / {
+            default_type "text/html";
+            return 200 '${fallbackHtml}';
+        }
+    }
 }
 
 stream {
@@ -85,29 +113,29 @@ ${mapEntries}
 
 ${mainServer}
 
-${limitBlocks ? limitBlocks + '\n' : ''}}
+${limitBlocks ? limitBlocks + '\n' : ''}${portBlocks ? portBlocks + '\n' : ''}}
 `;
 }
 
-export async function ensureNginxContainer(): Promise<void> {
+export async function ensureNginxContainer(extraPorts: number[] = []): Promise<void> {
   const containerName = config.nginxContainerName;
+  const requiredPorts = [443, ...extraPorts.filter((p) => p !== 443)];
 
   // Remove any existing container that might be misconfigured
   try {
     const existing = docker.getContainer(containerName);
     const info = await existing.inspect();
 
-    // Check if port 443 is properly bound
-    const portBindings = info.HostConfig?.PortBindings?.['443/tcp'];
-    const hasPort443 = Array.isArray(portBindings) && portBindings.some(
-      (b: { HostPort?: string }) => b.HostPort === '443'
-    );
+    // Check if all required ports are bound
+    const portBindings = info.HostConfig?.PortBindings || {};
+    const boundPorts = Object.keys(portBindings).map((k) => parseInt(k));
+    const hasAllPorts = requiredPorts.every((p) => boundPorts.includes(p));
 
-    if (hasPort443 && info.State.Running) {
-      return; // Container is healthy
+    if (hasAllPorts && info.State.Running) {
+      return; // Container is healthy with correct ports
     }
 
-    if (hasPort443 && !info.State.Running) {
+    if (hasAllPorts && !info.State.Running) {
       // Right config, just not running — inject config and start
       const initialConf = generateNginxConfig([]);
       const tar = createTarBuffer('nginx.conf', initialConf);
@@ -116,10 +144,18 @@ export async function ensureNginxContainer(): Promise<void> {
       return;
     }
 
-    // Wrong port config — remove and recreate
+    // Wrong port config or missing ports — remove and recreate
     await existing.remove({ force: true });
   } catch {
     // Container doesn't exist — will create below
+  }
+
+  // Build portBindings for all required ports
+  const portBindings: Record<string, [{ HostPort: string }]> = {};
+  const exposedPorts: Record<string, {}> = {};
+  for (const p of requiredPorts) {
+    portBindings[`${p}/tcp`] = [{ HostPort: String(p) }];
+    exposedPorts[`${p}/tcp`] = {};
   }
 
   // Pull image if needed
@@ -130,15 +166,11 @@ export async function ensureNginxContainer(): Promise<void> {
     Image: 'nginx:latest',
     name: containerName,
     HostConfig: {
-      PortBindings: {
-        '443/tcp': [{ HostPort: '443' }],
-      },
+      PortBindings: portBindings,
       NetworkMode: config.dockerNetwork,
       RestartPolicy: { Name: 'unless-stopped' },
     },
-    ExposedPorts: {
-      '443/tcp': {},
-    },
+    ExposedPorts: exposedPorts,
   });
 
   // Inject stream config BEFORE starting so nginx starts with the correct config
@@ -147,12 +179,17 @@ export async function ensureNginxContainer(): Promise<void> {
   await container.putArchive(tar, { path: '/etc/nginx' });
 
   await container.start();
-  console.log('nginx container created and started with stream config on port 443');
+  console.log(`nginx container created with ports: ${requiredPorts.join(', ')}`);
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
-  // Ensure nginx is up before updating
-  await ensureNginxContainer();
+  // Collect all required ports: 443 + any custom listenPorts
+  const extraPorts = proxies
+    .filter((p) => p.listenPort && p.listenPort !== 443)
+    .map((p) => p.listenPort!);
+
+  // Ensure nginx is up with correct port bindings before updating
+  await ensureNginxContainer(extraPorts);
 
   const nginxConf = generateNginxConfig(proxies);
   const container = docker.getContainer(config.nginxContainerName);
