@@ -5,7 +5,7 @@ RUN apk add --no-cache bash git docker-cli docker-cli-compose
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install --production=false
+RUN npm install --production=false --prefer-online
 
 COPY tsconfig.json ./
 COPY src ./src

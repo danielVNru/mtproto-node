@@ -1,8 +1,13 @@
 services:
   service-node:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: mtproto-service-node
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "${PORT:-8443}:8443"
     volumes:
