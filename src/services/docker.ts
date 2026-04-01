@@ -78,6 +78,7 @@ export async function ensureProxyImage(): Promise<void> {
 function generateProxychainsConfig(socks5Host: string): string {
   return `strict_chain
 quiet_mode
+proxy_dns
 tcp_read_time_out 15000
 tcp_connect_time_out 8000
 
