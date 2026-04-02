@@ -16,6 +16,9 @@ export interface VlessConfig {
   publicKey?: string; // REALITY public key
   shortId?: string;   // REALITY short ID
   flow?: string;
+  wsPath?: string;
+  wsHost?: string;
+  grpcServiceName?: string;
 }
 
 export async function fetchAndParseSubscription(url: string): Promise<VlessConfig | null> {
@@ -84,17 +87,28 @@ function parseVlessUri(uri: string): VlessConfig | null {
     const publicKey = params.get('pbk') || undefined;
     const shortId = params.get('sid') || undefined;
     const flow = params.get('flow') || undefined;
+    const wsPath = params.get('path') || '/';
+    const wsHost = params.get('host') || sni;
+    const grpcServiceName = params.get('serviceName') || params.get('mode') || '';
 
-    return { uuid, host, port, security, network, sni, fingerprint, publicKey, shortId, flow };
+    return { uuid, host, port, security, network, sni, fingerprint, publicKey, shortId, flow, wsPath, wsHost, grpcServiceName };
   } catch {
     return null;
   }
 }
 
 function generateXrayConfig(vless: VlessConfig): string {
-  const streamSettings: Record<string, any> = {
-    network: vless.network === 'ws' ? 'ws' : vless.network === 'grpc' ? 'grpc' : 'tcp',
-  };
+  const net = vless.network === 'ws' ? 'ws' : vless.network === 'grpc' ? 'grpc' : 'tcp';
+  const streamSettings: Record<string, any> = { network: net };
+
+  if (net === 'ws') {
+    streamSettings.wsSettings = {
+      path: vless.wsPath || '/',
+      headers: { Host: vless.wsHost || vless.sni },
+    };
+  } else if (net === 'grpc') {
+    streamSettings.grpcSettings = { serviceName: vless.grpcServiceName || '' };
+  }
 
   if (vless.security === 'reality') {
     streamSettings.security = 'reality';

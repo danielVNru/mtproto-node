@@ -24,7 +24,7 @@ USER telemt
 
 ENV RUST_LOG=info
 
-CMD ["/bin/sh", "-c", "if [ -f /etc/proxychains4.conf ]; then exec proxychains4 -f /etc/proxychains4.conf /usr/local/bin/telemt /etc/telemt/config.toml; else exec /usr/local/bin/telemt /etc/telemt/config.toml; fi"]
+CMD ["/bin/sh", "-c", "if [ -f /etc/proxychains-vpn.conf ]; then exec proxychains4 -f /etc/proxychains-vpn.conf /usr/local/bin/telemt /etc/telemt/config.toml; else exec /usr/local/bin/telemt /etc/telemt/config.toml; fi"]
 `;
 
 export async function ensureNetwork(): Promise<void> {
@@ -158,7 +158,7 @@ export async function createProxyContainer(
   if (socks5Host) {
     const socks5Ip = await resolveContainerIp(socks5Host);
     const pcConfig = generateProxychainsConfig(socks5Ip);
-    const pcTar = createTarBuffer('proxychains4.conf', pcConfig);
+    const pcTar = createTarBuffer('proxychains-vpn.conf', pcConfig);
     await container.putArchive(pcTar, { path: '/etc' });
   }
 

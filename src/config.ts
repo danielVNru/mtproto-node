@@ -7,7 +7,7 @@ export const config = {
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   dockerNetwork: 'mtproto-net',
   nginxContainerName: 'mtproto-nginx',
-  proxyImageName: 'telemt-proxy-v2',
+  proxyImageName: 'telemt-proxy-v3',
   proxyContainerPrefix: 'mtproto-proxy-',
   xrayContainerPrefix: 'mtproto-xray-',
   portRangeStart: 10001,
@@ -47,12 +47,7 @@ export const FAKE_TLS_DOMAINS = [
   'cdn.akamai.com',
   'fastly.net',
   // Social / Media
-  'www.youtube.com',
-  'www.instagram.com',
-  'www.facebook.com',
   'static.xx.fbcdn.net',
-  'abs.twimg.com',
-  'pbs.twimg.com',
   'www.reddit.com',
   'www.linkedin.com',
   // E-commerce / Services
