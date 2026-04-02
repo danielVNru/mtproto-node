@@ -100,7 +100,7 @@ async function resolveContainerIp(containerName: string): Promise<string> {
   throw new Error(`Cannot resolve IP for container ${containerName}`);
 }
 
-function generateConfigToml(secret: string, domain: string, tag?: string, useVpn?: boolean): string {
+function generateConfigToml(secret: string, domain: string, listenPort: number, tag?: string, useVpn?: boolean): string {
   let toml = `[general]
 use_middle_proxy = ${useVpn ? 'false' : 'true'}
 `;
@@ -116,7 +116,7 @@ secure = false
 tls = true
 
 [server]
-port = 443
+port = ${listenPort || 443}
 
 [censorship]
 tls_domain = "${domain}"
@@ -133,6 +133,7 @@ export async function createProxyContainer(
   containerName: string,
   secret: string,
   domain: string,
+  listenPort: number,
   tag?: string,
   socks5Host?: string
 ): Promise<string> {
@@ -150,7 +151,7 @@ export async function createProxyContainer(
   });
 
   // Inject config.toml into the container before starting
-  const configContent = generateConfigToml(secret, domain, tag, !!socks5Host);
+  const configContent = generateConfigToml(secret, domain, listenPort, tag, !!socks5Host);
   const tarBuffer = createTarBuffer('config.toml', configContent);
   await container.putArchive(tarBuffer, { path: '/etc/telemt' });
 

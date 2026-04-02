@@ -71,7 +71,7 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
   };
 
   try {
-    await dockerService.createProxyContainer(containerName, secret, domain, req.tag, socks5Host);
+    await dockerService.createProxyContainer(containerName, secret, domain, req.listenPort || config.nginxPort, req.tag, socks5Host);
     store.addProxy(proxy);
     await nginxService.updateNginxConfig(store.getAllProxies());
     return proxy;
@@ -157,6 +157,7 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
       proxy.containerName,
       proxy.secret,
       updates.domain || proxy.domain,
+      proxy.listenPort || config.nginxPort,
       updates.tag !== undefined ? updates.tag : proxy.tag,
       newSocks5Host
     );
@@ -179,6 +180,7 @@ export async function restartProxy(id: string): Promise<ProxyConfig | undefined>
     proxy.containerName,
     proxy.secret,
     proxy.domain,
+    proxy.listenPort || config.nginxPort,
     proxy.tag,
     proxy.vpnContainerName
   );
