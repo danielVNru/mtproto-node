@@ -21,9 +21,14 @@ export interface VlessConfig {
   grpcServiceName?: string;
 }
 
-export async function fetchAndParseSubscription(url: string): Promise<VlessConfig | null> {
+export async function fetchAndParseSubscription(input: string): Promise<VlessConfig | null> {
   try {
-    const resp = await fetch(url, {
+    // Raw vless:// link — parse directly
+    if (input.startsWith('vless://')) {
+      return parseVlessUri(input);
+    }
+
+    const resp = await fetch(input, {
       signal: AbortSignal.timeout(15000),
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
     });
