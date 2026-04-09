@@ -73,7 +73,7 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;
     server {
         listen ${p.listenPort};
-        set $target ${p.containerName}:${nginxPort};
+        set $target ${p.containerName}:${p.listenPort};
         proxy_pass $target;
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
@@ -83,7 +83,7 @@ ${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} 
       return `
     server {
         listen ${p.listenPort};
-        set $target ${p.containerName}:${nginxPort};
+        set $target ${p.containerName}:${p.listenPort};
         proxy_pass $target;
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
