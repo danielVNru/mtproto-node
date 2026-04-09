@@ -124,6 +124,7 @@ mkdir -p data
 
 # Build and start
 echo -e "${CYAN}Сборка и запуск сервис-ноды...${NC}"
+docker network create mtproto-net 2>/dev/null || true
 docker build --network=host -t mtproto-node-service-node .
 if [ $? -ne 0 ]; then
     echo -e "${RED}Ошибка при сборке образа.${NC}"

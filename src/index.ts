@@ -4,7 +4,7 @@ import { config, FAKE_TLS_DOMAINS } from './config';
 import { authMiddleware } from './middleware/auth';
 import proxyRoutes from './routes/proxy';
 import healthRoutes from './routes/health';
-import { ensureNetwork, ensureProxyImage } from './services/docker';
+import { ensureNetwork, ensureProxyImage, reconnectContainersToNetwork } from './services/docker';
 import { ensureNginxContainer, updateNginxConfig } from './services/nginx';
 import { startNginxLogWatcher } from './services/nginx';
 import { getAllProxies, getCustomDomains, setCustomDomains, getBlacklistedIps, setBlacklistedIps } from './store';
@@ -75,6 +75,9 @@ async function bootstrap(): Promise<void> {
   try {
     console.log('Initializing Docker network...');
     await ensureNetwork();
+
+    console.log('Reconnecting containers to network...');
+    await reconnectContainersToNetwork();
 
     console.log('Building telemt proxy image...');
     await ensureProxyImage();

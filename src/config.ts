@@ -7,7 +7,7 @@ export const config = {
   dataDir: process.env.DATA_DIR || path.join(__dirname, '..', 'data'),
   dockerNetwork: 'mtproto-net',
   nginxContainerName: 'mtproto-nginx',
-  proxyImageName: 'telemt-proxy-v3',
+  proxyImageName: 'telemt-proxy-v4',
   proxyContainerPrefix: 'mtproto-proxy-',
   xrayContainerPrefix: 'mtproto-xray-',
   portRangeStart: 10001,
