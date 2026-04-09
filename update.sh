@@ -62,8 +62,8 @@ git pull origin "$BRANCH"
 git stash pop 2>/dev/null || true
 
 echo -e "${CYAN}[4/5] Сборка и запуск обновлённой сервис-ноды...${NC}"
-docker build --network=host -t mtproto-node-service-node .
-docker compose up -d
+docker network create mtproto-net 2>/dev/null || true
+docker compose up -d --build
 
 # Ждём пока сервис-нода поднимется
 echo -e "  Ожидание запуска сервис-ноды..."

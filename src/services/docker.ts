@@ -1,5 +1,6 @@
 import Docker from 'dockerode';
 import { Readable } from 'stream';
+import { createHash } from 'crypto';
 import { config } from '../config';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -39,6 +40,33 @@ export async function ensureNetwork(): Promise<void> {
   }
 }
 
+export async function reconnectContainersToNetwork(): Promise<void> {
+  const network = docker.getNetwork(config.dockerNetwork);
+  const containers = await docker.listContainers({ all: true });
+
+  const managed = containers.filter((c) =>
+    c.Names.some(
+      (n) =>
+        n.includes(config.proxyContainerPrefix) ||
+        n.includes(config.xrayContainerPrefix) ||
+        n.includes(config.nginxContainerName)
+    )
+  );
+
+  for (const info of managed) {
+    const networks = Object.keys(info.NetworkSettings?.Networks || {});
+    if (!networks.includes(config.dockerNetwork)) {
+      try {
+        await network.connect({ Container: info.Id });
+        const name = info.Names[0]?.replace(/^\//, '') || info.Id.slice(0, 12);
+        console.log(`Reconnected ${name} to ${config.dockerNetwork}`);
+      } catch (err: any) {
+        console.error(`Failed to reconnect ${info.Names[0]}:`, err.message);
+      }
+    }
+  }
+}
+
 export async function pullImage(image: string): Promise<void> {
   try {
     await docker.getImage(image).inspect();
@@ -55,15 +83,28 @@ export async function pullImage(image: string): Promise<void> {
   }
 }
 
+const DOCKERFILE_HASH = createHash('sha256').update(TELEMT_DOCKERFILE).digest('hex').slice(0, 12);
+
 export async function ensureProxyImage(): Promise<void> {
+  let needsBuild = false;
   try {
-    await docker.getImage(config.proxyImageName).inspect();
+    const imageInfo = await docker.getImage(config.proxyImageName).inspect();
+    const existingHash = imageInfo.Config?.Labels?.['dockerfile.hash'] || '';
+    if (existingHash !== DOCKERFILE_HASH) {
+      console.log(`Proxy image outdated (${existingHash || 'none'} -> ${DOCKERFILE_HASH}), rebuilding...`);
+      try { await docker.getImage(config.proxyImageName).remove({ force: true }); } catch {}
+      needsBuild = true;
+    }
   } catch {
+    needsBuild = true;
+  }
+
+  if (needsBuild) {
     const tarBuffer = createTarBuffer('Dockerfile', TELEMT_DOCKERFILE);
     const stream = Readable.from(tarBuffer);
 
     await new Promise<void>((resolve, reject) => {
-      docker.buildImage(stream, { t: config.proxyImageName }, (err, output) => {
+      docker.buildImage(stream, { t: config.proxyImageName, labels: { 'dockerfile.hash': DOCKERFILE_HASH } }, (err, output) => {
         if (err) return reject(err);
         if (!output) return reject(new Error('No build stream'));
         docker.modem.followProgress(output, (err2: Error | null) => {

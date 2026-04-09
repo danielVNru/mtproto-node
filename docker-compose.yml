@@ -23,5 +23,5 @@ services:
 
 networks:
   mtproto-net:
+    external: true
     name: mtproto-net
-    driver: bridge
