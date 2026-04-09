@@ -309,7 +309,8 @@ export function getProxyLink(id: string, serverIp: string): string | null {
   if (!proxy) return null;
 
   const fullSecret = buildFullSecret(proxy.secret, proxy.domain);
-  return `tg://proxy?server=${encodeURIComponent(serverIp)}&port=${config.nginxPort}&secret=${fullSecret}`;
+  const port = proxy.listenPort || config.nginxPort;
+  return `tg://proxy?server=${encodeURIComponent(serverIp)}&port=${port}&secret=${fullSecret}`;
 }
 
 export function getProxyStatsHistory(id: string): StatsSnapshot[] {
