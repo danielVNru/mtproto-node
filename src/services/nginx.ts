@@ -56,7 +56,8 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
       return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;
     server {
         listen 127.0.0.1:${internalPort};
-        proxy_pass ${p.containerName}:${nginxPort};
+        set $target ${p.containerName}:${nginxPort};
+        proxy_pass $target;
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
         limit_conn ${zoneName} ${p.maxConnections};
@@ -67,10 +68,26 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
   // Dedicated port server blocks
   const portBlocks = portProxies
     .map((p) => {
-      const limitLine = p.maxConnections && p.maxConnections > 0
-        ? `\n        limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:${nginxPort};\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};\n    }`
-        : `\n    server {\n        listen ${p.listenPort};\n        proxy_pass ${p.containerName}:${nginxPort};\n        proxy_connect_timeout 10s;\n        proxy_timeout 300s;\n${denyEntries ? denyEntries + '\n' : ''}    }`;
-      return limitLine;
+      if (p.maxConnections && p.maxConnections > 0) {
+        return `
+    limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;
+    server {
+        listen ${p.listenPort};
+        set $target ${p.containerName}:${nginxPort};
+        proxy_pass $target;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};
+    }`;
+      }
+      return `
+    server {
+        listen ${p.listenPort};
+        set $target ${p.containerName}:${nginxPort};
+        proxy_pass $target;
+        proxy_connect_timeout 10s;
+        proxy_timeout 300s;
+${denyEntries ? denyEntries + '\n' : ''}    }`;
     })
     .join('\n');
 
@@ -184,15 +201,27 @@ export async function ensureNginxContainer(extraPorts: number[] = []): Promise<v
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
+  // Filter out proxies whose containers don't exist (stale data)
+  const aliveProxies: ProxyConfig[] = [];
+  for (const p of proxies) {
+    try {
+      const container = docker.getContainer(p.containerName);
+      await container.inspect();
+      aliveProxies.push(p);
+    } catch {
+      console.warn(`Skipping proxy ${p.id}: container ${p.containerName} not found, excluding from nginx config`);
+    }
+  }
+
   // Collect all required ports: nginxPort + any custom listenPorts
-  const extraPorts = proxies
+  const extraPorts = aliveProxies
     .filter((p) => p.listenPort && p.listenPort !== config.nginxPort)
     .map((p) => p.listenPort!);
 
   // Ensure nginx is up with correct port bindings before updating
   await ensureNginxContainer(extraPorts);
 
-  const nginxConf = generateNginxConfig(proxies);
+  const nginxConf = generateNginxConfig(aliveProxies);
   const container = docker.getContainer(config.nginxContainerName);
 
   // Write config to container
