@@ -6,13 +6,32 @@ import * as store from '../store';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-export function generateNginxConfig(proxies: ProxyConfig[]): string {
+// Resolve container IP in the mtproto-net bridge network
+async function resolveContainerIp(containerName: string): Promise<string> {
+  const container = docker.getContainer(containerName);
+  const info = await container.inspect();
+  const networks = info.NetworkSettings.Networks;
+  if (networks[config.dockerNetwork]?.IPAddress) {
+    return networks[config.dockerNetwork].IPAddress;
+  }
+  const first = Object.values(networks).find((n) => n?.IPAddress);
+  if (first?.IPAddress) return first.IPAddress;
+  throw new Error(`Cannot resolve IP for container ${containerName}`);
+}
+
+export function generateNginxConfig(proxies: ProxyConfig[], ipMap: Map<string, string> = new Map()): string {
   const runningProxies = proxies.filter((p) => p.status === 'running');
 
   // Split into SNI-based (nginxPort) vs dedicated-port proxies
   const nginxPort = config.nginxPort;
   const sniProxies = runningProxies.filter((p) => !p.listenPort || p.listenPort === nginxPort);
   const portProxies = runningProxies.filter((p) => p.listenPort && p.listenPort !== nginxPort);
+
+  // Helper: get target address for a proxy container
+  const target = (p: ProxyConfig, port: number) => {
+    const ip = ipMap.get(p.containerName);
+    return ip ? `${ip}:${port}` : `${p.containerName}:${port}`;
+  };
 
   // For SNI proxies with connection limits, assign internal loopback ports (10001+)
   const limitSniProxies = sniProxies.filter((p) => p.maxConnections && p.maxConnections > 0);
@@ -28,7 +47,7 @@ export function generateNginxConfig(proxies: ProxyConfig[]): string {
       if (internalPort) {
         return `        ${p.domain} 127.0.0.1:${internalPort};`;
       }
-      return `        ${p.domain} ${p.containerName}:${nginxPort};`;
+      return `        ${p.domain} ${target(p, nginxPort)};`;
     })
     .join('\n');
 
@@ -56,8 +75,7 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
       return `    limit_conn_zone $remote_addr zone=${zoneName}:1m;
     server {
         listen 127.0.0.1:${internalPort};
-        set $target ${p.containerName}:${nginxPort};
-        proxy_pass $target;
+        proxy_pass ${target(p, nginxPort)};
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
         limit_conn ${zoneName} ${p.maxConnections};
@@ -65,7 +83,7 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     })
     .join('\n\n');
 
-  // Dedicated port server blocks
+  // Dedicated port server blocks — each listens on its own port, routes to container's listenPort
   const portBlocks = portProxies
     .map((p) => {
       if (p.maxConnections && p.maxConnections > 0) {
@@ -73,8 +91,7 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     limit_conn_zone $remote_addr zone=port_${p.listenPort}:1m;
     server {
         listen ${p.listenPort};
-        set $target ${p.containerName}:${p.listenPort};
-        proxy_pass $target;
+        proxy_pass ${target(p, p.listenPort!)};
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
 ${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} ${p.maxConnections};
@@ -83,8 +100,7 @@ ${denyEntries ? denyEntries + '\n' : ''}        limit_conn port_${p.listenPort} 
       return `
     server {
         listen ${p.listenPort};
-        set $target ${p.containerName}:${p.listenPort};
-        proxy_pass $target;
+        proxy_pass ${target(p, p.listenPort!)};
         proxy_connect_timeout 10s;
         proxy_timeout 300s;
 ${denyEntries ? denyEntries + '\n' : ''}    }`;
@@ -96,6 +112,9 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     + '<body style="font-family:sans-serif;text-align:center;padding:60px">'
     + '<h1>Welcome</h1><p>This server is operating normally.</p>'
     + '</body></html>';
+
+  // When using host network we resolve IPs directly — no need for Docker DNS resolver
+  const useResolver = ipMap.size === 0;
 
   return `user nginx;
 worker_processes auto;
@@ -119,9 +138,7 @@ http {
 }
 
 stream {
-    resolver 127.0.0.11 valid=10s;
-
-    log_format proxy '$remote_addr [$time_local] $ssl_preread_server_name $status';
+${useResolver ? '    resolver 127.0.0.11 valid=10s;\n' : ''}    log_format proxy '$remote_addr [$time_local] $ssl_preread_server_name $status';
     access_log /dev/stdout proxy;
 
     map $ssl_preread_server_name $backend {
@@ -135,69 +152,53 @@ ${limitBlocks ? limitBlocks + '\n' : ''}${portBlocks ? portBlocks + '\n' : ''}}
 `;
 }
 
-export async function ensureNginxContainer(extraPorts: number[] = []): Promise<void> {
+// Nginx runs with host networking — no port bindings needed.
+// Adding new listen ports only requires a config reload, not container recreation.
+export async function ensureNginxContainer(): Promise<void> {
   const containerName = config.nginxContainerName;
-  const requiredPorts = [config.nginxPort, ...extraPorts.filter((p) => p !== config.nginxPort)];
 
-  // Remove any existing container that might be misconfigured
   try {
     const existing = docker.getContainer(containerName);
     const info = await existing.inspect();
 
-    // Check if all required ports are bound
-    const portBindings = info.HostConfig?.PortBindings || {};
-    const boundPorts = Object.keys(portBindings).map((k) => parseInt(k));
-    const hasAllPorts = requiredPorts.every((p) => boundPorts.includes(p));
+    // Check if container uses host network (migrated)
+    const isHostNetwork = info.HostConfig?.NetworkMode === 'host';
 
-    if (hasAllPorts && info.State.Running) {
-      return; // Container is healthy with correct ports
+    if (isHostNetwork && info.State.Running) {
+      return; // Already running with host network — nothing to do
     }
 
-    if (hasAllPorts && !info.State.Running) {
-      // Right config, just not running — inject config and start
-      const initialConf = generateNginxConfig([]);
-      const tar = createTarBuffer('nginx.conf', initialConf);
-      await existing.putArchive(tar, { path: '/etc/nginx' });
+    if (isHostNetwork && !info.State.Running) {
       await existing.start();
       return;
     }
 
-    // Wrong port config or missing ports — remove and recreate
+    // Old container with bridge network — remove and recreate with host network
+    console.log('Migrating nginx container to host network mode...');
+    await existing.stop().catch(() => {});
     await existing.remove({ force: true });
   } catch {
     // Container doesn't exist — will create below
   }
 
-  // Build portBindings for all required ports
-  const portBindings: Record<string, [{ HostPort: string }]> = {};
-  const exposedPorts: Record<string, {}> = {};
-  for (const p of requiredPorts) {
-    portBindings[`${p}/tcp`] = [{ HostPort: String(p) }];
-    exposedPorts[`${p}/tcp`] = {};
-  }
-
-  // Pull image if needed
   await pullImage('nginx:latest');
 
-  // Create container (not started yet)
   const container = await docker.createContainer({
     Image: 'nginx:latest',
     name: containerName,
     HostConfig: {
-      PortBindings: portBindings,
-      NetworkMode: config.dockerNetwork,
+      NetworkMode: 'host',
       RestartPolicy: { Name: 'unless-stopped' },
     },
-    ExposedPorts: exposedPorts,
   });
 
-  // Inject stream config BEFORE starting so nginx starts with the correct config
+  // Inject minimal config BEFORE starting
   const initialConf = generateNginxConfig([]);
   const tar = createTarBuffer('nginx.conf', initialConf);
   await container.putArchive(tar, { path: '/etc/nginx' });
 
   await container.start();
-  console.log(`nginx container created with ports: ${requiredPorts.join(', ')}`);
+  console.log('nginx container created with host network');
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
@@ -213,22 +214,27 @@ export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
     }
   }
 
-  // Collect all required ports: nginxPort + any custom listenPorts
-  const extraPorts = aliveProxies
-    .filter((p) => p.listenPort && p.listenPort !== config.nginxPort)
-    .map((p) => p.listenPort!);
+  await ensureNginxContainer();
 
-  // Ensure nginx is up with correct port bindings before updating
-  await ensureNginxContainer(extraPorts);
+  // Resolve container IPs (nginx uses host network, can't use Docker DNS)
+  const ipMap = new Map<string, string>();
+  for (const p of aliveProxies) {
+    try {
+      const ip = await resolveContainerIp(p.containerName);
+      ipMap.set(p.containerName, ip);
+    } catch (err) {
+      console.warn(`Cannot resolve IP for ${p.containerName}, skipping from nginx config`);
+    }
+  }
+  // Only include proxies whose IP we could resolve
+  const reachableProxies = aliveProxies.filter((p) => ipMap.has(p.containerName));
 
-  const nginxConf = generateNginxConfig(aliveProxies);
+  const nginxConf = generateNginxConfig(reachableProxies, ipMap);
   const container = docker.getContainer(config.nginxContainerName);
 
-  // Write config to container
   const tarStream = createTarBuffer('nginx.conf', nginxConf);
   await container.putArchive(tarStream, { path: '/etc/nginx' });
 
-  // Reload nginx
   const exec = await container.exec({
     Cmd: ['nginx', '-s', 'reload'],
     AttachStdout: true,
