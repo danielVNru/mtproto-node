@@ -83,8 +83,16 @@ ${denyEntries ? denyEntries + '\n' : ''}    }`;
     })
     .join('\n\n');
 
-  // Dedicated port server blocks — each listens on its own port, routes to container's listenPort
-  const portBlocks = portProxies
+  // Group port proxies by listenPort to avoid duplicate server blocks on the same port
+  const portGroups = new Map<number, ProxyConfig>();
+  for (const p of portProxies) {
+    if (!portGroups.has(p.listenPort!)) {
+      portGroups.set(p.listenPort!, p);
+    }
+  }
+
+  // Dedicated port server blocks — one per unique port
+  const portBlocks = Array.from(portGroups.values())
     .map((p) => {
       if (p.maxConnections && p.maxConnections > 0) {
         return `
@@ -177,6 +185,8 @@ export async function ensureNginxContainer(): Promise<void> {
     console.log('Migrating nginx container to host network mode...');
     await existing.stop().catch(() => {});
     await existing.remove({ force: true });
+    // Wait for docker-proxy to release port bindings
+    await new Promise((r) => setTimeout(r, 3000));
   } catch {
     // Container doesn't exist — will create below
   }
@@ -197,8 +207,21 @@ export async function ensureNginxContainer(): Promise<void> {
   const tar = createTarBuffer('nginx.conf', initialConf);
   await container.putArchive(tar, { path: '/etc/nginx' });
 
-  await container.start();
-  console.log('nginx container created with host network');
+  // Retry start in case ports are still being released
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await container.start();
+      console.log('nginx container created with host network');
+      return;
+    } catch (err: any) {
+      if (attempt < 3 && err?.statusCode === 500) {
+        console.warn(`nginx start attempt ${attempt} failed, retrying in 3s...`);
+        await new Promise((r) => setTimeout(r, 3000));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 export async function updateNginxConfig(proxies: ProxyConfig[]): Promise<void> {
