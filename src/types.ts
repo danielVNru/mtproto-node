@@ -26,6 +26,40 @@ export interface ProxyConfig {
   maskHost?: string;         // self-steal fallback host:port (non-MTProto traffic redirect)
   natIp?: string;            // tunnel exit node public IP (overrides node-level NAT_IP)
   tunnelInterface?: string;  // tunnel interface name, e.g. tun0 (for reference/future automation)
+  useMiddleProxy?: boolean;
+  fastMode?: boolean;
+  me2dcFallback?: boolean;
+  me2dcFast?: boolean;
+  meKeepaliveEnabled?: boolean;
+  meKeepaliveIntervalSecs?: number;
+  meKeepaliveJitterSecs?: number;
+  meKeepalivePayloadRandom?: boolean;
+  meReconnectBackoffBaseMs?: number;
+  meReconnectBackoffCapMs?: number;
+  meReconnectFastRetryCount?: number;
+  desyncAllFull?: boolean;
+  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWarmupStaggerEnabled?: boolean;
+  meWarmupStepDelayMs?: number;
+  meWarmupStepJitterMs?: number;
+  beobachten?: boolean;
+  beobachtenMinutes?: number;
+  beobachtenFlushSecs?: number;
+  beobachtenFile?: string;
+  upstreamConnectRetryAttempts?: number;
+  upstreamConnectRetryBackoffMs?: number;
+  tgConnect?: boolean;
+  rstOnClose?: boolean;
+  logLevel?: string;
+  unknownDcFileLogEnabled?: boolean;
+  updateEvery?: number;
+  networkPrefer?: string;
+  stunServers?: string[];
+  serverClientMss?: number;
+  censorshipTlsDomain?: string;
+  censorshipTlsEmulation?: string;
+  censorshipTlsFrontDir?: string;
+  meInitRetryAttempts?: number;
 }
 
 export interface ProxyCreateRequest {
@@ -41,6 +75,40 @@ export interface ProxyCreateRequest {
   maskHost?: string;
   natIp?: string;
   tunnelInterface?: string;
+  useMiddleProxy?: boolean;
+  fastMode?: boolean;
+  me2dcFallback?: boolean;
+  me2dcFast?: boolean;
+  meKeepaliveEnabled?: boolean;
+  meKeepaliveIntervalSecs?: number;
+  meKeepaliveJitterSecs?: number;
+  meKeepalivePayloadRandom?: boolean;
+  meReconnectBackoffBaseMs?: number;
+  meReconnectBackoffCapMs?: number;
+  meReconnectFastRetryCount?: number;
+  desyncAllFull?: boolean;
+  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWarmupStaggerEnabled?: boolean;
+  meWarmupStepDelayMs?: number;
+  meWarmupStepJitterMs?: number;
+  beobachten?: boolean;
+  beobachtenMinutes?: number;
+  beobachtenFlushSecs?: number;
+  beobachtenFile?: string;
+  upstreamConnectRetryAttempts?: number;
+  upstreamConnectRetryBackoffMs?: number;
+  tgConnect?: boolean;
+  rstOnClose?: boolean;
+  logLevel?: string;
+  unknownDcFileLogEnabled?: boolean;
+  updateEvery?: number;
+  networkPrefer?: string;
+  stunServers?: string[];
+  serverClientMss?: number;
+  censorshipTlsDomain?: string;
+  censorshipTlsEmulation?: string;
+  censorshipTlsFrontDir?: string;
+  meInitRetryAttempts?: number;
 }
 
 export interface ProxyUpdateRequest {
@@ -49,10 +117,45 @@ export interface ProxyUpdateRequest {
   name?: string;
   note?: string;
   maxConnections?: number;
+  listenPort?: number;
   vpnSubscription?: string;
   maskHost?: string;
   natIp?: string;
   tunnelInterface?: string;
+  useMiddleProxy?: boolean;
+  fastMode?: boolean;
+  me2dcFallback?: boolean;
+  me2dcFast?: boolean;
+  meKeepaliveEnabled?: boolean;
+  meKeepaliveIntervalSecs?: number;
+  meKeepaliveJitterSecs?: number;
+  meKeepalivePayloadRandom?: boolean;
+  meReconnectBackoffBaseMs?: number;
+  meReconnectBackoffCapMs?: number;
+  meReconnectFastRetryCount?: number;
+  desyncAllFull?: boolean;
+  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWarmupStaggerEnabled?: boolean;
+  meWarmupStepDelayMs?: number;
+  meWarmupStepJitterMs?: number;
+  beobachten?: boolean;
+  beobachtenMinutes?: number;
+  beobachtenFlushSecs?: number;
+  beobachtenFile?: string;
+  upstreamConnectRetryAttempts?: number;
+  upstreamConnectRetryBackoffMs?: number;
+  tgConnect?: boolean;
+  rstOnClose?: boolean;
+  logLevel?: string;
+  unknownDcFileLogEnabled?: boolean;
+  updateEvery?: number;
+  networkPrefer?: string;
+  stunServers?: string[];
+  serverClientMss?: number;
+  censorshipTlsDomain?: string;
+  censorshipTlsEmulation?: string;
+  censorshipTlsFrontDir?: string;
+  meInitRetryAttempts?: number;
 }
 
 export interface ProxyStats {
