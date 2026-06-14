@@ -5,7 +5,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN ARCH=$(uname -m) && \
-    wget -qO- "https://github.com/telemt/telemt/releases/download/3.4.13/telemt-x86_64-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin/ && \
+    wget -qO- "https://github.com/telemt/telemt/releases/download/3.4.15/telemt-x86_64-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin/ && \
     chmod +x /usr/local/bin/telemt
 
 RUN useradd -r -s /bin/false telemt && \
