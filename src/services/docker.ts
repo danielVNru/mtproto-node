@@ -184,7 +184,7 @@ interface TelemtProxyOptions {
   stunServers?: string[];
   serverClientMss?: number;
   censorshipTlsDomain?: string;
-  censorshipTlsEmulation?: string;
+  censorshipTlsEmulation?: boolean;
   censorshipTlsFrontDir?: string;
 }
 
@@ -233,7 +233,7 @@ function generateConfigToml(
     stunServers: ['stun.l.google.com:19302'],
     serverClientMss: 1360,
     censorshipTlsDomain: domain,
-    censorshipTlsEmulation: 'tls',
+    censorshipTlsEmulation: true,
     censorshipTlsFrontDir: '',
     ...options,
   };
@@ -297,10 +297,8 @@ tls_domain = "${opts.censorshipTlsDomain}"
 mask = true
 `;
 
-  if (opts.censorshipTlsEmulation) {
-    toml += `tls_emulation = "${opts.censorshipTlsEmulation}"
+  toml += `tls_emulation = ${opts.censorshipTlsEmulation}
 `;
-  }
 
   if (opts.censorshipTlsFrontDir) {
     toml += `tls_front_dir = "${opts.censorshipTlsFrontDir}"

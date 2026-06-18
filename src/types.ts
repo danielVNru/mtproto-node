@@ -57,7 +57,7 @@ export interface ProxyConfig {
   stunServers?: string[];
   serverClientMss?: number;
   censorshipTlsDomain?: string;
-  censorshipTlsEmulation?: string;
+  censorshipTlsEmulation?: boolean;
   censorshipTlsFrontDir?: string;
   meInitRetryAttempts?: number;
 }
@@ -106,7 +106,7 @@ export interface ProxyCreateRequest {
   stunServers?: string[];
   serverClientMss?: number;
   censorshipTlsDomain?: string;
-  censorshipTlsEmulation?: string;
+  censorshipTlsEmulation?: boolean;
   censorshipTlsFrontDir?: string;
   meInitRetryAttempts?: number;
 }
