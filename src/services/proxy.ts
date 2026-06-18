@@ -435,7 +435,7 @@ export interface ExportedProxy {
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
   tgConnect?: boolean;
-  rstOnClose?: boolean;
+  rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;

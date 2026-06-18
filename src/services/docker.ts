@@ -2,6 +2,7 @@ import Docker from 'dockerode';
 import { Readable } from 'stream';
 import { createHash } from 'crypto';
 import { config } from '../config';
+import { StringDecoder } from 'string_decoder';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -176,7 +177,7 @@ interface TelemtProxyOptions {
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
   tgConnect?: boolean;
-  rstOnClose?: boolean;
+  rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;
@@ -225,7 +226,7 @@ function generateConfigToml(
     upstreamConnectRetryAttempts: 5,
     upstreamConnectRetryBackoffMs: 500,
     tgConnect: true,
-    rstOnClose: true,
+    rstOnClose: 'off',
     logLevel: 'silent',
     unknownDcFileLogEnabled: true,
     updateEvery: 30,

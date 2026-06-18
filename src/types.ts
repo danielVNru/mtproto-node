@@ -38,7 +38,7 @@ export interface ProxyConfig {
   meReconnectBackoffCapMs?: number;
   meReconnectFastRetryCount?: number;
   desyncAllFull?: boolean;
-  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWriterPickMode?: 'sorted_rr' | 'p2c' | string;
   meWarmupStaggerEnabled?: boolean;
   meWarmupStepDelayMs?: number;
   meWarmupStepJitterMs?: number;
@@ -49,7 +49,7 @@ export interface ProxyConfig {
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
   tgConnect?: boolean;
-  rstOnClose?: boolean;
+  rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;
@@ -87,7 +87,7 @@ export interface ProxyCreateRequest {
   meReconnectBackoffCapMs?: number;
   meReconnectFastRetryCount?: number;
   desyncAllFull?: boolean;
-  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWriterPickMode?: 'sorted_rr' | 'p2c' | string;
   meWarmupStaggerEnabled?: boolean;
   meWarmupStepDelayMs?: number;
   meWarmupStepJitterMs?: number;
@@ -98,7 +98,7 @@ export interface ProxyCreateRequest {
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
   tgConnect?: boolean;
-  rstOnClose?: boolean;
+  rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;
@@ -134,7 +134,7 @@ export interface ProxyUpdateRequest {
   meReconnectBackoffCapMs?: number;
   meReconnectFastRetryCount?: number;
   desyncAllFull?: boolean;
-  meWriterPickMode?: 'fast' | 'balanced' | 'safe' | string;
+  meWriterPickMode?: 'sorted_rr' | 'p2c' | string;
   meWarmupStaggerEnabled?: boolean;
   meWarmupStepDelayMs?: number;
   meWarmupStepJitterMs?: number;
@@ -145,7 +145,7 @@ export interface ProxyUpdateRequest {
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
   tgConnect?: boolean;
-  rstOnClose?: boolean;
+  rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;
