@@ -215,7 +215,7 @@ function generateConfigToml(
     meReconnectBackoffCapMs: 1000,
     meReconnectFastRetryCount: 12,
     desyncAllFull: true,
-    meWriterPickMode: 'fast',
+    meWriterPickMode: 'p2c',
     meWarmupStaggerEnabled: true,
     meWarmupStepDelayMs: 30,
     meWarmupStepJitterMs: 5,
@@ -263,7 +263,7 @@ beobachten_file = "${opts.beobachtenFile}"
 upstream_connect_retry_attempts = ${opts.upstreamConnectRetryAttempts}
 upstream_connect_retry_backoff_ms = ${opts.upstreamConnectRetryBackoffMs}
 tg_connect = ${opts.tgConnect}
-rst_on_close = ${opts.rstOnClose}
+rst_on_close = "${opts.rstOnClose}"
 log_level = "${opts.logLevel}"
 unknown_dc_file_log_enabled = ${opts.unknownDcFileLogEnabled}
 update_every = ${opts.updateEvery}
