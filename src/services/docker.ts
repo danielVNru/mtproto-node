@@ -176,7 +176,7 @@ interface TelemtProxyOptions {
   beobachtenFile?: string;
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
-  tgConnect?: boolean;
+  tgConnect?: number;
   rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
@@ -225,7 +225,7 @@ function generateConfigToml(
     beobachtenFile: '/tmp/telemt-beobachten.json',
     upstreamConnectRetryAttempts: 5,
     upstreamConnectRetryBackoffMs: 500,
-    tgConnect: true,
+    tgConnect: 10,
     rstOnClose: 'off',
     logLevel: 'silent',
     unknownDcFileLogEnabled: true,

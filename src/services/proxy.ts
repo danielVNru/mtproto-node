@@ -434,7 +434,7 @@ export interface ExportedProxy {
   beobachtenFile?: string;
   upstreamConnectRetryAttempts?: number;
   upstreamConnectRetryBackoffMs?: number;
-  tgConnect?: boolean;
+  tgConnect?: number;
   rstOnClose?: string;
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
