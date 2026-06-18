@@ -226,7 +226,7 @@ function generateConfigToml(
     upstreamConnectRetryBackoffMs: 500,
     tgConnect: true,
     rstOnClose: true,
-    logLevel: 'info',
+    logLevel: 'silent',
     unknownDcFileLogEnabled: true,
     updateEvery: 30,
     networkPrefer: 'system',
