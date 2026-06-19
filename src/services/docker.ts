@@ -2,6 +2,7 @@ import Docker from 'dockerode';
 import { Readable } from 'stream';
 import { createHash } from 'crypto';
 import { config } from '../config';
+import { StringDecoder } from 'string_decoder';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -151,6 +152,43 @@ async function resolveContainerIp(containerName: string): Promise<string> {
   throw new Error(`Cannot resolve IP for container ${containerName}`);
 }
 
+interface TelemtProxyOptions {
+  useMiddleProxy?: boolean;
+  fastMode?: boolean;
+  meInitRetryAttempts?: number;
+  me2dcFallback?: boolean;
+  me2dcFast?: boolean;
+  meKeepaliveEnabled?: boolean;
+  meKeepaliveIntervalSecs?: number;
+  meKeepaliveJitterSecs?: number;
+  meKeepalivePayloadRandom?: boolean;
+  meReconnectBackoffBaseMs?: number;
+  meReconnectBackoffCapMs?: number;
+  meReconnectFastRetryCount?: number;
+  desyncAllFull?: boolean;
+  meWriterPickMode?: string;
+  meWarmupStaggerEnabled?: boolean;
+  meWarmupStepDelayMs?: number;
+  meWarmupStepJitterMs?: number;
+  beobachten?: boolean;
+  beobachtenMinutes?: number;
+  beobachtenFlushSecs?: number;
+  beobachtenFile?: string;
+  upstreamConnectRetryAttempts?: number;
+  upstreamConnectRetryBackoffMs?: number;
+  tgConnect?: number;
+  rstOnClose?: string;
+  logLevel?: string;
+  unknownDcFileLogEnabled?: boolean;
+  updateEvery?: number;
+  networkPrefer?: string;
+  stunServers?: string[];
+  serverClientMss?: number;
+  censorshipTlsDomain?: string;
+  censorshipTlsEmulation?: boolean;
+  censorshipTlsFrontDir?: string;
+}
+
 function generateConfigToml(
   secret: string,
   domain: string,
@@ -160,13 +198,79 @@ function generateConfigToml(
   socks5Port?: number,
   maskHost?: string,
   natIp?: string,
+  options: TelemtProxyOptions = {},
 ): string {
   const cleanTag = tag ? tag.trim().replace(/[^0-9a-fA-F]/g, '') : '';
+  const opts: Required<TelemtProxyOptions> = {
+    useMiddleProxy: true,
+    fastMode: true,
+    meInitRetryAttempts: 5,
+    me2dcFallback: true,
+    me2dcFast: true,
+    meKeepaliveEnabled: true,
+    meKeepaliveIntervalSecs: 5,
+    meKeepaliveJitterSecs: 1,
+    meKeepalivePayloadRandom: true,
+    meReconnectBackoffBaseMs: 200,
+    meReconnectBackoffCapMs: 1000,
+    meReconnectFastRetryCount: 12,
+    desyncAllFull: true,
+    meWriterPickMode: 'p2c',
+    meWarmupStaggerEnabled: true,
+    meWarmupStepDelayMs: 30,
+    meWarmupStepJitterMs: 5,
+    beobachten: true,
+    beobachtenMinutes: 15,
+    beobachtenFlushSecs: 5,
+    beobachtenFile: '/tmp/telemt-beobachten.json',
+    upstreamConnectRetryAttempts: 5,
+    upstreamConnectRetryBackoffMs: 500,
+    tgConnect: 10,
+    rstOnClose: 'off',
+    logLevel: 'silent',
+    unknownDcFileLogEnabled: true,
+    updateEvery: 30,
+    networkPrefer: 'system',
+    stunServers: ['stun.l.google.com:19302'],
+    serverClientMss: 1360,
+    censorshipTlsDomain: domain,
+    censorshipTlsEmulation: true,
+    censorshipTlsFrontDir: '',
+    ...options,
+  };
 
   let toml = `[general]
-use_middle_proxy = true
-me2dc_fallback = true
-me_init_retry_attempts = 5
+use_middle_proxy = ${opts.useMiddleProxy}
+fast_mode = ${opts.fastMode}
+me2dc_fallback = ${opts.me2dcFallback}
+me2dc_fast = ${opts.me2dcFast}
+me_keepalive_enabled = ${opts.meKeepaliveEnabled}
+me_keepalive_interval_secs = ${opts.meKeepaliveIntervalSecs}
+me_keepalive_jitter_secs = ${opts.meKeepaliveJitterSecs}
+me_keepalive_payload_random = ${opts.meKeepalivePayloadRandom}
+me_reconnect_backoff_base_ms = ${opts.meReconnectBackoffBaseMs}
+me_reconnect_backoff_cap_ms = ${opts.meReconnectBackoffCapMs}
+me_reconnect_fast_retry_count = ${opts.meReconnectFastRetryCount}
+desync_all_full = ${opts.desyncAllFull}
+me_writer_pick_mode = "${opts.meWriterPickMode}"
+me_warmup_stagger_enabled = ${opts.meWarmupStaggerEnabled}
+me_warmup_step_delay_ms = ${opts.meWarmupStepDelayMs}
+me_warmup_step_jitter_ms = ${opts.meWarmupStepJitterMs}
+beobachten = ${opts.beobachten}
+beobachten_minutes = ${opts.beobachtenMinutes}
+beobachten_flush_secs = ${opts.beobachtenFlushSecs}
+beobachten_file = "${opts.beobachtenFile}"
+upstream_connect_retry_attempts = ${opts.upstreamConnectRetryAttempts}
+upstream_connect_retry_backoff_ms = ${opts.upstreamConnectRetryBackoffMs}
+tg_connect = ${opts.tgConnect}
+rst_on_close = "${opts.rstOnClose}"
+log_level = "${opts.logLevel}"
+unknown_dc_file_log_enabled = ${opts.unknownDcFileLogEnabled}
+update_every = ${opts.updateEvery}
+network_prefer = "${opts.networkPrefer}"
+stun_servers = [${opts.stunServers.map((server) => `"${server}"`).join(', ')}]
+server_client_mss = ${opts.serverClientMss}
+me_init_retry_attempts = ${opts.meInitRetryAttempts}
 `;
 
   // VPN mode: tell ME servers to expect connections from the VPN exit IP.
@@ -190,9 +294,17 @@ tls = true
 port = ${listenPort || 443}
 
 [censorship]
-tls_domain = "${domain}"
+tls_domain = "${opts.censorshipTlsDomain}"
 mask = true
 `;
+
+  toml += `tls_emulation = ${opts.censorshipTlsEmulation}
+`;
+
+  if (opts.censorshipTlsFrontDir) {
+    toml += `tls_front_dir = "${opts.censorshipTlsFrontDir}"
+`;
+  }
 
   if (maskHost) {
     toml += `mask_host = "${maskHost}"\n`;
@@ -241,6 +353,7 @@ export async function createProxyContainer(
   socks5Host?: string,
   maskHost?: string,
   natIp?: string,
+  options: TelemtProxyOptions = {},
 ): Promise<string> {
   await ensureNetwork();
   await ensureProxyImage();
@@ -291,7 +404,7 @@ export async function createProxyContainer(
   });
 
   // Inject config.toml into the container before starting
-  const configContent = generateConfigToml(secret, domain, listenPort, tag, resolvedSocks5Host, resolvedSocks5Port, resolvedMaskHost, natIp);
+  const configContent = generateConfigToml(secret, domain, listenPort, tag, resolvedSocks5Host, resolvedSocks5Port, resolvedMaskHost, natIp, options);
   const tarBuffer = createTarBuffer('config.toml', configContent);
   await container.putArchive(tarBuffer, { path: '/etc/telemt' });
 

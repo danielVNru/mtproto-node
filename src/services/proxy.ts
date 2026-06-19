@@ -59,21 +59,17 @@ export async function createProxy(req: ProxyCreateRequest): Promise<ProxyConfig>
     containerName,
     status: 'running',
     createdAt: new Date().toISOString(),
-    tag: req.tag,
     trafficUp: 0,
     trafficDown: 0,
     connectedIps: [],
-    maxConnections: req.maxConnections,
-    listenPort: req.listenPort,
-    vpnSubscription: req.vpnSubscription,
     vpnContainerName,
-    maskHost: req.maskHost,
+    ...req,
     natIp: req.natIp || config.natIp || undefined,
     tunnelInterface: req.tunnelInterface || config.tunnelInterface || undefined,
   };
 
   try {
-    await dockerService.createProxyContainer(containerName, secret, domain, req.listenPort || config.nginxPort, req.tag, socks5Host, req.maskHost, req.natIp || config.natIp || undefined);
+    await dockerService.createProxyContainer(containerName, secret, domain, req.listenPort || config.nginxPort, req.tag, socks5Host, req.maskHost, req.natIp || config.natIp || undefined, req);
     store.addProxy(proxy);
     await nginxService.updateNginxConfig(store.getAllProxies());
     return proxy;
@@ -132,6 +128,53 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
   if (req.name !== undefined) updates.name = req.name;
   if (req.note !== undefined) updates.note = req.note;
   if (req.maxConnections !== undefined) updates.maxConnections = req.maxConnections;
+  if (req.listenPort !== undefined && req.listenPort !== proxy.listenPort) {
+    updates.listenPort = req.listenPort;
+    needsRestart = true;
+  }
+
+  const advancedProxyKeys: Array<keyof ProxyUpdateRequest> = [
+    'useMiddleProxy',
+    'fastMode',
+    'me2dcFallback',
+    'me2dcFast',
+    'meKeepaliveEnabled',
+    'meKeepaliveIntervalSecs',
+    'meKeepaliveJitterSecs',
+    'meKeepalivePayloadRandom',
+    'meReconnectBackoffBaseMs',
+    'meReconnectBackoffCapMs',
+    'meReconnectFastRetryCount',
+    'desyncAllFull',
+    'meWriterPickMode',
+    'meWarmupStaggerEnabled',
+    'meWarmupStepDelayMs',
+    'meWarmupStepJitterMs',
+    'beobachten',
+    'beobachtenMinutes',
+    'beobachtenFlushSecs',
+    'beobachtenFile',
+    'upstreamConnectRetryAttempts',
+    'upstreamConnectRetryBackoffMs',
+    'tgConnect',
+    'rstOnClose',
+    'logLevel',
+    'unknownDcFileLogEnabled',
+    'updateEvery',
+    'networkPrefer',
+    'stunServers',
+    'serverClientMss',
+    'censorshipTlsDomain',
+    'censorshipTlsEmulation',
+    'censorshipTlsFrontDir',
+    'meInitRetryAttempts',
+  ];
+  for (const key of advancedProxyKeys) {
+    if (req[key] !== undefined && req[key] !== proxy[key]) {
+      updates[key] = req[key] as any;
+      needsRestart = true;
+    }
+  }
 
   // Handle maskHost change
   if (req.maskHost !== undefined && req.maskHost !== proxy.maskHost) {
@@ -182,7 +225,8 @@ export async function updateProxy(id: string, req: ProxyUpdateRequest): Promise<
       updates.tag !== undefined ? updates.tag : proxy.tag,
       newSocks5Host,
       updates.maskHost !== undefined ? updates.maskHost : proxy.maskHost,
-      effectiveNatIp
+      effectiveNatIp,
+      Object.assign({}, proxy, req)
     );
   }
 
@@ -207,7 +251,8 @@ export async function restartProxy(id: string): Promise<ProxyConfig | undefined>
     proxy.tag,
     proxy.vpnContainerName,
     proxy.maskHost,
-    config.natIp || undefined
+    config.natIp || undefined,
+    proxy
   );
 
   const updated = store.updateProxy(id, { status: 'running' });
@@ -364,6 +409,43 @@ export interface ExportedProxy {
   tag?: string;
   maxConnections?: number;
   vpnSubscription?: string;
+  maskHost?: string;
+  natIp?: string;
+  tunnelInterface?: string;
+  useMiddleProxy?: boolean;
+  fastMode?: boolean;
+  me2dcFallback?: boolean;
+  me2dcFast?: boolean;
+  meKeepaliveEnabled?: boolean;
+  meKeepaliveIntervalSecs?: number;
+  meKeepaliveJitterSecs?: number;
+  meKeepalivePayloadRandom?: boolean;
+  meReconnectBackoffBaseMs?: number;
+  meReconnectBackoffCapMs?: number;
+  meReconnectFastRetryCount?: number;
+  desyncAllFull?: boolean;
+  meWriterPickMode?: string;
+  meWarmupStaggerEnabled?: boolean;
+  meWarmupStepDelayMs?: number;
+  meWarmupStepJitterMs?: number;
+  beobachten?: boolean;
+  beobachtenMinutes?: number;
+  beobachtenFlushSecs?: number;
+  beobachtenFile?: string;
+  upstreamConnectRetryAttempts?: number;
+  upstreamConnectRetryBackoffMs?: number;
+  tgConnect?: number;
+  rstOnClose?: string;
+  logLevel?: string;
+  unknownDcFileLogEnabled?: boolean;
+  updateEvery?: number;
+  networkPrefer?: string;
+  stunServers?: string[];
+  serverClientMss?: number;
+  censorshipTlsDomain?: string;
+  censorshipTlsEmulation?: boolean;
+  censorshipTlsFrontDir?: string;
+  meInitRetryAttempts?: number;
 }
 
 export interface ExportBundle {
@@ -387,6 +469,43 @@ export function exportProxies(): ExportBundle {
       tag: p.tag,
       maxConnections: p.maxConnections,
       vpnSubscription: p.vpnSubscription,
+      maskHost: p.maskHost,
+      natIp: p.natIp,
+      tunnelInterface: p.tunnelInterface,
+      useMiddleProxy: p.useMiddleProxy,
+      fastMode: p.fastMode,
+      me2dcFallback: p.me2dcFallback,
+      me2dcFast: p.me2dcFast,
+      meKeepaliveEnabled: p.meKeepaliveEnabled,
+      meKeepaliveIntervalSecs: p.meKeepaliveIntervalSecs,
+      meKeepaliveJitterSecs: p.meKeepaliveJitterSecs,
+      meKeepalivePayloadRandom: p.meKeepalivePayloadRandom,
+      meReconnectBackoffBaseMs: p.meReconnectBackoffBaseMs,
+      meReconnectBackoffCapMs: p.meReconnectBackoffCapMs,
+      meReconnectFastRetryCount: p.meReconnectFastRetryCount,
+      desyncAllFull: p.desyncAllFull,
+      meWriterPickMode: p.meWriterPickMode,
+      meWarmupStaggerEnabled: p.meWarmupStaggerEnabled,
+      meWarmupStepDelayMs: p.meWarmupStepDelayMs,
+      meWarmupStepJitterMs: p.meWarmupStepJitterMs,
+      beobachten: p.beobachten,
+      beobachtenMinutes: p.beobachtenMinutes,
+      beobachtenFlushSecs: p.beobachtenFlushSecs,
+      beobachtenFile: p.beobachtenFile,
+      upstreamConnectRetryAttempts: p.upstreamConnectRetryAttempts,
+      upstreamConnectRetryBackoffMs: p.upstreamConnectRetryBackoffMs,
+      tgConnect: p.tgConnect,
+      rstOnClose: p.rstOnClose,
+      logLevel: p.logLevel,
+      unknownDcFileLogEnabled: p.unknownDcFileLogEnabled,
+      updateEvery: p.updateEvery,
+      networkPrefer: p.networkPrefer,
+      stunServers: p.stunServers,
+      serverClientMss: p.serverClientMss,
+      censorshipTlsDomain: p.censorshipTlsDomain,
+      censorshipTlsEmulation: p.censorshipTlsEmulation,
+      censorshipTlsFrontDir: p.censorshipTlsFrontDir,
+      meInitRetryAttempts: p.meInitRetryAttempts,
     })),
   };
 }
@@ -397,7 +516,7 @@ export async function importProxies(bundle: ExportBundle): Promise<{ imported: n
 
   for (const p of bundle.proxies) {
     try {
-      await createProxy({
+        await createProxy({
         secret: p.secret,
         domain: p.domain,
         name: p.name,
@@ -406,6 +525,43 @@ export async function importProxies(bundle: ExportBundle): Promise<{ imported: n
         tag: p.tag,
         maxConnections: p.maxConnections,
         vpnSubscription: p.vpnSubscription,
+        maskHost: p.maskHost,
+        natIp: p.natIp,
+        tunnelInterface: p.tunnelInterface,
+        useMiddleProxy: p.useMiddleProxy,
+        fastMode: p.fastMode,
+        me2dcFallback: p.me2dcFallback,
+        me2dcFast: p.me2dcFast,
+        meKeepaliveEnabled: p.meKeepaliveEnabled,
+        meKeepaliveIntervalSecs: p.meKeepaliveIntervalSecs,
+        meKeepaliveJitterSecs: p.meKeepaliveJitterSecs,
+        meKeepalivePayloadRandom: p.meKeepalivePayloadRandom,
+        meReconnectBackoffBaseMs: p.meReconnectBackoffBaseMs,
+        meReconnectBackoffCapMs: p.meReconnectBackoffCapMs,
+        meReconnectFastRetryCount: p.meReconnectFastRetryCount,
+        desyncAllFull: p.desyncAllFull,
+        meWriterPickMode: p.meWriterPickMode,
+        meWarmupStaggerEnabled: p.meWarmupStaggerEnabled,
+        meWarmupStepDelayMs: p.meWarmupStepDelayMs,
+        meWarmupStepJitterMs: p.meWarmupStepJitterMs,
+        beobachten: p.beobachten,
+        beobachtenMinutes: p.beobachtenMinutes,
+        beobachtenFlushSecs: p.beobachtenFlushSecs,
+        beobachtenFile: p.beobachtenFile,
+        upstreamConnectRetryAttempts: p.upstreamConnectRetryAttempts,
+        upstreamConnectRetryBackoffMs: p.upstreamConnectRetryBackoffMs,
+        tgConnect: p.tgConnect,
+        rstOnClose: p.rstOnClose,
+        logLevel: p.logLevel,
+        unknownDcFileLogEnabled: p.unknownDcFileLogEnabled,
+        updateEvery: p.updateEvery,
+        networkPrefer: p.networkPrefer,
+        stunServers: p.stunServers,
+        serverClientMss: p.serverClientMss,
+        censorshipTlsDomain: p.censorshipTlsDomain,
+        censorshipTlsEmulation: p.censorshipTlsEmulation,
+        censorshipTlsFrontDir: p.censorshipTlsFrontDir,
+        meInitRetryAttempts: p.meInitRetryAttempts,
       });
       imported++;
     } catch (err: any) {
