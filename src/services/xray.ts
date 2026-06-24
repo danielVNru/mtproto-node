@@ -22,13 +22,21 @@ export interface VlessConfig {
   mode?: string;
   extra?: Record<string, any>;
   alpn?: string[];
+  protocol?: 'vless' | 'trojan'; // default: 'vless'
+  password?: string;             // for trojan
 }
 
 export async function fetchAndParseSubscription(input: string): Promise<VlessConfig> {
   // Raw vless:// link — parse directly
   if (input.startsWith('vless://')) {
     const cfg = parseVlessUri(input);
-    if (!cfg) throw new Error('Не удалось разобрать vless:// ссылку');
+    if (!cfg) throw new Error('Failed to parse vless:// link');
+    return cfg;
+  }
+  // Raw trojan:// link — parse directly
+  if (input.startsWith('trojan://')) {
+    const cfg = parseTrojanUri(input);
+    if (!cfg) throw new Error('Failed to parse trojan:// link');
     return cfg;
   }
 
@@ -57,13 +65,20 @@ export async function fetchAndParseSubscription(input: string): Promise<VlessCon
   } catch {}
 
   const lines = content.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('vless://'));
-  if (lines.length === 0) {
-    throw new Error('В подписке не найдено vless:// записей (поддерживается только VLESS)');
+  const trojanLines = content.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('trojan://'));
+  if (lines.length === 0 && trojanLines.length === 0) {
+    throw new Error('No vless:// or trojan:// entries found in subscription');
   }
 
-  const cfg = parseVlessUri(lines[0]);
-  if (!cfg) throw new Error('Не удалось разобрать vless:// ссылку из подписки');
+  if (lines.length > 0) {
+    const cfg = parseVlessUri(lines[0]);
+    if (!cfg) throw new Error('Failed to parse vless:// link from subscription');
+    return cfg;
+  }
+  const cfg = parseTrojanUri(trojanLines[0]);
+  if (!cfg) throw new Error('Failed to parse trojan:// link from subscription');
   return cfg;
+
 }
 
 function parseVlessUri(uri: string): VlessConfig | null {
@@ -148,6 +163,68 @@ function parseVlessUri(uri: string): VlessConfig | null {
   }
 }
 
+function parseTrojanUri(uri: string): VlessConfig | null {
+  try {
+    // trojan://password@host:port?params#name
+    const withoutScheme = uri.slice('trojan://'.length);
+    const hashIdx = withoutScheme.indexOf('#');
+    const withoutHash = hashIdx >= 0 ? withoutScheme.slice(0, hashIdx) : withoutScheme;
+    const atIdx = withoutHash.lastIndexOf('@');
+    const password = decodeURIComponent(withoutHash.slice(0, atIdx));
+    const rest = withoutHash.slice(atIdx + 1);
+    const qIdx = rest.indexOf('?');
+    const hostPart = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
+    const queryStr = qIdx >= 0 ? rest.slice(qIdx + 1) : '';
+
+    let host: string;
+    let portStr: string;
+    if (hostPart.startsWith('[')) {
+      const closeIdx = hostPart.indexOf(']');
+      host = hostPart.slice(1, closeIdx);
+      portStr = hostPart.slice(closeIdx + 2);
+    } else {
+      const colonIdx = hostPart.lastIndexOf(':');
+      host = hostPart.slice(0, colonIdx);
+      portStr = hostPart.slice(colonIdx + 1);
+    }
+    const port = parseInt(portStr) || 443;
+    const params = new URLSearchParams(queryStr);
+    const security = params.get('security') || 'tls';
+    const networkParam = (params.get('type') || params.get('network') || 'tcp').toLowerCase();
+    const network = ['ws', 'grpc', 'xhttp'].includes(networkParam) ? networkParam : 'tcp';
+    const sni = params.get('sni') || params.get('peer') || params.get('servername') || host;
+    const fingerprint = params.get('fp') || 'chrome';
+    const publicKey = params.get('pbk') || undefined;
+    const shortId = params.get('sid') || undefined;
+    const path = params.get('path') || '/';
+    const hostHeader = params.get('host') || sni;
+    const grpcServiceName = params.get('serviceName') || '';
+    const mode = params.get('mode') || undefined;
+    const alpnRaw = params.get('alpn');
+    const alpn = alpnRaw ? alpnRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    return {
+      protocol: 'trojan',
+      password,
+      uuid: '',
+      host,
+      port,
+      security,
+      network,
+      sni,
+      fingerprint,
+      publicKey,
+      shortId,
+      path,
+      hostHeader,
+      grpcServiceName,
+      mode,
+      alpn,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function generateXrayConfig(vless: VlessConfig): string {
   const net =
     vless.network === 'ws'
@@ -198,11 +275,40 @@ function generateXrayConfig(vless: VlessConfig): string {
     }
   }
 
-  const outboundUser: Record<string, any> = {
-    id: vless.uuid,
-    encryption: 'none',
-  };
-  if (vless.flow) outboundUser.flow = vless.flow;
+  const outbound =
+    vless.protocol === 'trojan'
+      ? {
+          protocol: 'trojan',
+          settings: {
+            servers: [
+              {
+                address: vless.host,
+                port: vless.port,
+                password: vless.password || '',
+              },
+            ],
+          },
+          streamSettings,
+        }
+      : {
+          protocol: 'vless',
+          settings: {
+            vnext: [
+              {
+                address: vless.host,
+                port: vless.port,
+                users: [
+                  {
+                    id: vless.uuid,
+                    encryption: 'none',
+                    ...(vless.flow ? { flow: vless.flow } : {}),
+                  },
+                ],
+              },
+            ],
+          },
+          streamSettings,
+        };
 
   const xrayConfig = {
     log: { loglevel: 'warning' },
@@ -214,21 +320,7 @@ function generateXrayConfig(vless: VlessConfig): string {
         settings: { auth: 'noauth', udp: false },
       },
     ],
-    outbounds: [
-      {
-        protocol: 'vless',
-        settings: {
-          vnext: [
-            {
-              address: vless.host,
-              port: vless.port,
-              users: [outboundUser],
-            },
-          ],
-        },
-        streamSettings,
-      },
-    ],
+    outbounds: [outbound],
   };
 
   return JSON.stringify(xrayConfig, null, 2);

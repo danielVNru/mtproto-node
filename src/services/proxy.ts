@@ -251,7 +251,7 @@ export async function restartProxy(id: string): Promise<ProxyConfig | undefined>
     proxy.tag,
     proxy.vpnContainerName,
     proxy.maskHost,
-    config.natIp || undefined,
+    proxy.natIp || config.natIp || undefined,
     proxy
   );
 

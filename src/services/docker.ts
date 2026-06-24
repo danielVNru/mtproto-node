@@ -24,7 +24,7 @@ WORKDIR /opt/telemt
 
 USER telemt
 
-ENV RUST_LOG=info
+
 
 CMD ["/usr/local/bin/telemt", "/etc/telemt/config.toml"]
 `;
@@ -181,9 +181,9 @@ interface TelemtProxyOptions {
   logLevel?: string;
   unknownDcFileLogEnabled?: boolean;
   updateEvery?: number;
-  networkPrefer?: string;
   stunServers?: string[];
-  serverClientMss?: number;
+  clientMss?: string;
+  meSocksKdfPolicy?: string;
   censorshipTlsDomain?: string;
   censorshipTlsEmulation?: boolean;
   censorshipTlsFrontDir?: string;
@@ -212,27 +212,27 @@ function generateConfigToml(
     meKeepaliveJitterSecs: 1,
     meKeepalivePayloadRandom: true,
     meReconnectBackoffBaseMs: 200,
-    meReconnectBackoffCapMs: 1000,
+    meReconnectBackoffCapMs: 30000,
     meReconnectFastRetryCount: 12,
-    desyncAllFull: true,
+    desyncAllFull: false,
     meWriterPickMode: 'p2c',
     meWarmupStaggerEnabled: true,
-    meWarmupStepDelayMs: 30,
-    meWarmupStepJitterMs: 5,
+    meWarmupStepDelayMs: 500,
+    meWarmupStepJitterMs: 300,
     beobachten: true,
     beobachtenMinutes: 15,
-    beobachtenFlushSecs: 5,
-    beobachtenFile: '/tmp/telemt-beobachten.json',
+    beobachtenFlushSecs: 15,
+    beobachtenFile: 'cache/beobachten.json',
     upstreamConnectRetryAttempts: 5,
     upstreamConnectRetryBackoffMs: 500,
     tgConnect: 10,
     rstOnClose: 'off',
     logLevel: 'silent',
     unknownDcFileLogEnabled: true,
-    updateEvery: 30,
-    networkPrefer: 'system',
+    updateEvery: 300,
     stunServers: ['stun.l.google.com:19302'],
-    serverClientMss: 1360,
+    clientMss: 'tspu',
+    meSocksKdfPolicy: '',
     censorshipTlsDomain: domain,
     censorshipTlsEmulation: true,
     censorshipTlsFrontDir: '',
@@ -267,9 +267,6 @@ rst_on_close = "${opts.rstOnClose}"
 log_level = "${opts.logLevel}"
 unknown_dc_file_log_enabled = ${opts.unknownDcFileLogEnabled}
 update_every = ${opts.updateEvery}
-network_prefer = "${opts.networkPrefer}"
-stun_servers = [${opts.stunServers.map((server) => `"${server}"`).join(', ')}]
-server_client_mss = ${opts.serverClientMss}
 me_init_retry_attempts = ${opts.meInitRetryAttempts}
 `;
 
@@ -290,9 +287,13 @@ classic = false
 secure = false
 tls = true
 
+[network]
+stun_servers = [${opts.stunServers.map((s) => `"${s}"`).join(', ')}]
+
 [server]
 port = ${listenPort || 443}
-
+${opts.clientMss ? `client_mss = "${opts.clientMss}"
+` : ''}
 [censorship]
 tls_domain = "${opts.censorshipTlsDomain}"
 mask = true
@@ -328,11 +329,9 @@ type = "socks5"
 address = "${socks5Host}:${socks5Port}"
 `;
   } else if (!natIp && socks5Host && socks5Port) {
-    // Legacy mode: ME and fetch go direct; DC goes through SOCKS5.
+    // VPN mode: route ALL traffic (ME, fetch, DC) through SOCKS5 to bypass blocking.
     toml += `
-[[upstreams]]
-type = "direct"
-scopes = "me, fetch"
+me_socks_kdf_policy = "compat"
 
 [[upstreams]]
 type = "socks5"
@@ -397,7 +396,7 @@ export async function createProxyContainer(
       CapAdd: ['NET_BIND_SERVICE'],
       LogConfig: {
         Type: 'json-file',
-        Config: { 'max-size': '5m', 'max-file': '2' },
+        Config: { 'max-size': '50m', 'max-file': '5' },
       },
       ...(needsHostGateway ? { ExtraHosts: ['host.docker.internal:host-gateway'] } : {}),
     },
