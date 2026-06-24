@@ -24,7 +24,7 @@ WORKDIR /opt/telemt
 
 USER telemt
 
-
+ENV RUST_LOG=info
 
 CMD ["/usr/local/bin/telemt", "/etc/telemt/config.toml"]
 `;
@@ -212,17 +212,17 @@ function generateConfigToml(
     meKeepaliveJitterSecs: 1,
     meKeepalivePayloadRandom: true,
     meReconnectBackoffBaseMs: 200,
-    meReconnectBackoffCapMs: 30000,
+    meReconnectBackoffCapMs: 1000,
     meReconnectFastRetryCount: 12,
-    desyncAllFull: false,
+    desyncAllFull: true,
     meWriterPickMode: 'p2c',
     meWarmupStaggerEnabled: true,
-    meWarmupStepDelayMs: 500,
-    meWarmupStepJitterMs: 300,
+    meWarmupStepDelayMs: 30,
+    meWarmupStepJitterMs: 5,
     beobachten: true,
     beobachtenMinutes: 15,
-    beobachtenFlushSecs: 15,
-    beobachtenFile: 'cache/beobachten.json',
+    beobachtenFlushSecs: 5,
+    beobachtenFile: '/tmp/telemt-beobachten.json',
     upstreamConnectRetryAttempts: 5,
     upstreamConnectRetryBackoffMs: 500,
     tgConnect: 10,
@@ -232,7 +232,7 @@ function generateConfigToml(
     updateEvery: 300,
     stunServers: ['stun.l.google.com:19302'],
     clientMss: 'tspu',
-    meSocksKdfPolicy: '',
+    meSocksKdfPolicy: 'compat',
     censorshipTlsDomain: domain,
     censorshipTlsEmulation: true,
     censorshipTlsFrontDir: '',
@@ -268,6 +268,7 @@ log_level = "${opts.logLevel}"
 unknown_dc_file_log_enabled = ${opts.unknownDcFileLogEnabled}
 update_every = ${opts.updateEvery}
 me_init_retry_attempts = ${opts.meInitRetryAttempts}
+${!natIp && socks5Host && socks5Port ? `me_socks_kdf_policy = "${opts.meSocksKdfPolicy}"\n` : ''}
 `;
 
   // VPN mode: tell ME servers to expect connections from the VPN exit IP.
