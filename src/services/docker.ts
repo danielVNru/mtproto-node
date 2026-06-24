@@ -332,7 +332,6 @@ address = "${socks5Host}:${socks5Port}"
   } else if (!natIp && socks5Host && socks5Port) {
     // VPN mode: route ALL traffic (ME, fetch, DC) through SOCKS5 to bypass blocking.
     toml += `
-me_socks_kdf_policy = "compat"
 
 [[upstreams]]
 type = "socks5"
