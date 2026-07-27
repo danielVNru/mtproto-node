@@ -238,6 +238,9 @@ function generateConfigToml(
     censorshipTlsFrontDir: '',
     ...options,
   };
+  const censorshipTlsEmulation = typeof opts.censorshipTlsEmulation === 'boolean'
+    ? opts.censorshipTlsEmulation
+    : String(opts.censorshipTlsEmulation).trim().toLowerCase() === 'true';
 
   let toml = `[general]
 use_middle_proxy = ${opts.useMiddleProxy}
@@ -300,7 +303,7 @@ tls_domain = "${opts.censorshipTlsDomain}"
 mask = true
 `;
 
-  toml += `tls_emulation = ${opts.censorshipTlsEmulation}
+  toml += `tls_emulation = ${censorshipTlsEmulation}
 `;
 
   if (opts.censorshipTlsFrontDir) {

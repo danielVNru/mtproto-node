@@ -153,7 +153,7 @@ export interface ProxyUpdateRequest {
   stunServers?: string[];
   serverClientMss?: number;
   censorshipTlsDomain?: string;
-  censorshipTlsEmulation?: string;
+  censorshipTlsEmulation?: boolean;
   censorshipTlsFrontDir?: string;
   meInitRetryAttempts?: number;
 }
